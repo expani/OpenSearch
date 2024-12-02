@@ -215,8 +215,11 @@ public class StarTreeFilterTests extends AggregatorTestCase {
     }
 
     // Returns count of documents in the star tree having field SNDV & applied filters
-    private long getDocCountFromStarTree(CompositeIndexReader starTreeDocValuesReader, Map<String, Long> filters, LeafReaderContext context)
-        throws IOException {
+    private long getDocCountFromStarTree(
+        CompositeIndexReader starTreeDocValuesReader,
+        Map<String, Object> filters,
+        LeafReaderContext context
+    ) throws IOException {
         List<CompositeIndexFieldInfo> compositeIndexFields = starTreeDocValuesReader.getCompositeIndexFields();
         CompositeIndexFieldInfo starTree = compositeIndexFields.get(0);
         StarTreeValues starTreeValues = StarTreeQueryHelper.getStarTreeValues(context, starTree);
@@ -242,7 +245,7 @@ public class StarTreeFilterTests extends AggregatorTestCase {
                 assert canAdvance : "Cannot advance to document ID " + bit + " in values iterator.";
 
                 // Iterate over values for the current document ID
-                for (int i = 0, count = valuesIterator.entryValueCount(); i < count; i++) {
+                for (int i = 0, count = valuesIterator.docValueCount(); i < count; i++) {
                     long value = valuesIterator.nextValue();
                     // Assert that the value is as expected using the provided consumer
                     docCount += value;

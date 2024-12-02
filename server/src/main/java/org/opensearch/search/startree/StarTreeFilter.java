@@ -18,6 +18,7 @@ import org.opensearch.index.compositeindex.datacube.startree.index.StarTreeValue
 import org.opensearch.index.compositeindex.datacube.startree.node.StarTreeNode;
 import org.opensearch.index.compositeindex.datacube.startree.node.StarTreeNodeType;
 import org.opensearch.index.compositeindex.datacube.startree.utils.iterator.SortedNumericStarTreeValuesIterator;
+import org.opensearch.index.compositeindex.datacube.startree.utils.iterator.SortedSetStarTreeValuesIterator;
 import org.opensearch.index.compositeindex.datacube.startree.utils.iterator.StarTreeValuesIterator;
 
 import java.io.IOException;
@@ -47,8 +48,8 @@ public class StarTreeFilter {
      *   First go over the star tree and try to match as many dimensions as possible
      *   For the remaining columns, use star-tree doc values to match them
      */
-    public static FixedBitSet getStarTreeResult(StarTreeValues starTreeValues, Map<String, Long> predicateEvaluators) throws IOException {
-        Map<String, Long> queryMap = predicateEvaluators != null ? predicateEvaluators : Collections.emptyMap();
+    public static FixedBitSet getStarTreeResult(StarTreeValues starTreeValues, Map<String, Object> predicateEvaluators) throws IOException {
+        Map<String, Object> queryMap = predicateEvaluators != null ? predicateEvaluators : Collections.emptyMap();
         StarTreeResult starTreeResult = traverseStarTree(starTreeValues, queryMap);
 
         // Initialize FixedBitSet with size maxMatchedDoc + 1
@@ -70,15 +71,18 @@ public class StarTreeFilter {
         // Temporary FixedBitSet reused for filtering
         FixedBitSet tempBitSet = new FixedBitSet(starTreeResult.maxMatchedDoc + 1);
 
+        iterateOverAllDimensionValues(starTreeValues);
+
+        // Goes here when max nodes in leaf is not full.
         // Process remaining predicate columns to further filter the results
         for (String remainingPredicateColumn : starTreeResult.remainingPredicateColumns) {
             logger.debug("remainingPredicateColumn : {}, maxMatchedDoc : {} ", remainingPredicateColumn, starTreeResult.maxMatchedDoc);
 
-            SortedNumericStarTreeValuesIterator ndv = (SortedNumericStarTreeValuesIterator) starTreeValues.getDimensionValuesIterator(
-                remainingPredicateColumn
-            );
+            // TODO : Handle keyword, IP data types
+            SortedNumericStarTreeValuesIterator ndv = (SortedNumericStarTreeValuesIterator) starTreeValues.getDimensionValuesIterator(remainingPredicateColumn);
 
-            long queryValue = queryMap.get(remainingPredicateColumn); // Get the query value directly
+            // TODO : Handle keyword, IP data types and range queries.
+            long queryValue = (long) queryMap.get(remainingPredicateColumn); // Get the query value directly
 
             // Clear the temporary bit set before reuse
             tempBitSet.clear(0, starTreeResult.maxMatchedDoc + 1);
@@ -89,11 +93,18 @@ public class StarTreeFilter {
                     ? bitSet.nextSetBit(entryId + 1)
                     : DocIdSetIterator.NO_MORE_DOCS) {
                     if (ndv.advance(entryId) != StarTreeValuesIterator.NO_MORE_ENTRIES) {
-                        final int valuesCount = ndv.entryValueCount();
+                        final int valuesCount = ndv.docValueCount();
                         for (int i = 0; i < valuesCount; i++) {
                             long value = ndv.nextValue();
+                            // TODO : Instead use matchNextValue(Object queryValue) which returns true if queryValue matches next value in
+                            // iterator.
                             // Compare the value with the query value
                             if (value == queryValue) {
+                            // TODO : Handle keyword, IP data types while performing match.
+                            // TODO : Handle range queries or any query type by passing "queryValue" to an interface
+                            // TODO : Moving the logic of deciding a match away from here and based on underlying query
+                            // TODO : builder and field datatype.
+                            // TODO : Call matchNextValue(Object queryValue) here
                                 tempBitSet.set(entryId);  // Set bit for the matching entryId
                                 break;  // No need to check other values for this entryId
                             }
@@ -113,7 +124,7 @@ public class StarTreeFilter {
      * Helper method to traverse the star tree, get matching documents and keep track of all the
      * predicate dimensions that are not matched.
      */
-    private static StarTreeResult traverseStarTree(StarTreeValues starTreeValues, Map<String, Long> queryMap) throws IOException {
+    private static StarTreeResult traverseStarTree(StarTreeValues starTreeValues, Map<String, Object> queryMap) throws IOException {
         DocIdSetBuilder docsWithField = new DocIdSetBuilder(starTreeValues.getStarTreeDocumentCount());
         DocIdSetBuilder.BulkAdder adder;
         Set<String> globalRemainingPredicateColumns = null;
@@ -157,10 +168,13 @@ public class StarTreeFilter {
                 for (long i = starTreeNode.getStartDocId(); i < starTreeNode.getEndDocId(); i++) {
                     docIds.add((int) i);
                     matchedDocsCountInStarTree++;
+                    // FIXME starTreeNode#getEndDocId-1 will always be the maximum so one check is sufficient.
                     maxDocNum = Math.max((int) i, maxDocNum);
                 }
                 continue;
             }
+
+            // We have still not reached all the dimensions containing the remaining predicates.
 
             String childDimension = dimensionNames.get(dimensionId + 1);
             StarTreeNode starNode = null;
@@ -169,7 +183,8 @@ public class StarTreeFilter {
             }
 
             if (remainingPredicateColumns.contains(childDimension)) {
-                long queryValue = queryMap.get(childDimension); // Get the query value directly from the map
+                // TODO : Handle keyword, IP data types and range queries. Conversion from ordinal for keyword/IP data types
+                long queryValue = (long) queryMap.get(childDimension); // Get the query value directly from the map
                 StarTreeNode matchingChild = starTreeNode.getChildForDimensionValue(queryValue);
                 if (matchingChild != null) {
                     queue.add(matchingChild);
@@ -202,6 +217,34 @@ public class StarTreeFilter {
             matchedDocsCountInStarTree,
             maxDocNum
         );
+    }
+
+    // TODO : Remove after Draft PR
+    private static void iterateOverAllDimensionValues(StarTreeValues starTreeValues) throws IOException {
+        String[] dimensionNames = new String[]{"verb", "status", "port", "response_code"};
+        for (String dimensionName : dimensionNames) {
+            StarTreeValuesIterator starTreeValuesIterator = starTreeValues.getDimensionValuesIterator(dimensionName);
+            int docId = 0;
+            List<Integer> docIds = new ArrayList<>();
+            List<Object> values = new ArrayList<>();
+            while (starTreeValuesIterator.advance(docId) != NO_MORE_DOCS) {
+                docIds.add(starTreeValuesIterator.entryId());
+                if (starTreeValuesIterator.docValueCount() == 0) {
+                    System.out.println("Zero doc value count for dimension " + dimensionName);
+                    values.add(null);
+                } else {
+                    for (int i = 1; i <= starTreeValuesIterator.docValueCount(); i++) {
+                        if (starTreeValuesIterator instanceof SortedNumericStarTreeValuesIterator) {
+                            values.add(((SortedNumericStarTreeValuesIterator) starTreeValuesIterator).nextValue());
+                        } else if (starTreeValuesIterator instanceof SortedSetStarTreeValuesIterator) {
+                            values.add(((SortedSetStarTreeValuesIterator) starTreeValuesIterator).nextOrd());
+                        }
+                    }
+                }
+                docId++;
+            }
+            System.out.printf("Dimension Values for dimension %s has size %s and are %s and docIds are %s", dimensionName, values.size(), values, docIds);
+        }
     }
 
     /**

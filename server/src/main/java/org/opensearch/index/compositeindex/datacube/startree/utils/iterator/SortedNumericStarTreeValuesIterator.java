@@ -26,15 +26,18 @@ public class SortedNumericStarTreeValuesIterator extends StarTreeValuesIterator 
         super(docIdSetIterator);
     }
 
-    public long nextValue() throws IOException {
-        return ((SortedNumericDocValues) docIdSetIterator).nextValue();
+    @Override
+    public int docValueCount() {
+        return ((SortedNumericDocValues) docIdSetIterator).docValueCount();
     }
 
-    public int entryValueCount() throws IOException {
-        return ((SortedNumericDocValues) docIdSetIterator).docValueCount();
+    public long nextValue() throws IOException {
+        return ((SortedNumericDocValues) docIdSetIterator).nextValue();
     }
 
     public boolean advanceExact(int target) throws IOException {
         return ((SortedNumericDocValues) docIdSetIterator).advanceExact(target);
     }
+
+    // TODO : We need a Iterator<Long> valuesInRange(long low, long high)
 }

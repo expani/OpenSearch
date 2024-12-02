@@ -193,6 +193,7 @@ public class FixedLengthStarTreeNode implements StarTreeNode {
 
     @Override
     public StarTreeNode getChildForDimensionValue(Long dimensionValue) throws IOException {
+        // TODO : Better to move it inside binarySearchChild() to avoid NPE for callers who don't handle this in future
         // there will be no children for leaf nodes
         if (isLeaf()) {
             return null;
@@ -254,6 +255,8 @@ public class FixedLengthStarTreeNode implements StarTreeNode {
         if (matchStarTreeNodeTypeOrNull(new FixedLengthStarTreeNode(in, high), StarTreeNodeType.NULL) != null) {
             high--;
         }
+
+        // TODO : Check if dimension value is within the range of low and high.
 
         while (low <= high) {
             int mid = low + (high - low) / 2;

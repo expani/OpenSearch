@@ -127,8 +127,10 @@ class MinAggregator extends NumericMetricsAggregator.SingleValue {
             }
         }
 
+
         CompositeIndexFieldInfo supportedStarTree = getSupportedStarTree(this.context);
         if (supportedStarTree != null) {
+            // FIXME : Check whether the returned collector is null to determine if support is possible.
             return getStarTreeCollector(ctx, sub, supportedStarTree);
         }
         return getDefaultLeafCollector(ctx, sub);

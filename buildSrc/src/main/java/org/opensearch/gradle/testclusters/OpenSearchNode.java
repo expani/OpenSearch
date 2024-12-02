@@ -1192,6 +1192,9 @@ public class OpenSearchNode implements TestClusterConfiguration {
         baseConfig.put("logger.org.opensearch.action.support.master", "DEBUG");
         baseConfig.put("logger.org.opensearch.cluster.coordination", "DEBUG");
 
+        baseConfig.put("opensearch.experimental.feature.composite_index.star_tree.enabled", "true");
+        baseConfig.put("indices.composite_index.star_tree.enabled", "true");
+
         HashSet<String> overriden = new HashSet<>(baseConfig.keySet());
         overriden.retainAll(settings.keySet());
         OVERRIDABLE_SETTINGS.forEach(overriden::remove);

@@ -89,7 +89,7 @@ public class SearchServiceStarTreeTests extends OpenSearchSingleNodeTestCase {
             "startree",
             CompositeMappedFieldType.CompositeFieldType.STAR_TREE
         );
-        Map<String, Long> expectedQueryMap = null;
+        Map<String, Object> expectedQueryMap = null;
         assertStarTreeContext(request, sourceBuilder, new StarTreeQueryContext(expectedStarTree, expectedQueryMap, -1), -1);
 
         // Case 4: MatchAllQuery and aggregations present, but postFilter specified, should not use star tree

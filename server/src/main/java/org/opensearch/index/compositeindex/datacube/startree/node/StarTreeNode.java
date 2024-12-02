@@ -102,8 +102,9 @@ public interface StarTreeNode {
 
     /**
      * Returns the child node for the given dimension value in the star-tree.
+     * Responsibility of callers to handle conversion to ordinal ( dimensionValue ) for non-numeric fields.
      *
-     * @param dimensionValue the dimension value
+     * @param dimensionValue the dimension value which will be Doc Value ordinals for non-numeric fields
      * @return the child node for the given dimension value or null if child is not present
      * @throws IOException if an I/O error occurs while retrieving the child node
      */

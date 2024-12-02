@@ -22,6 +22,9 @@
 -Xms${heap.min}
 -Xmx${heap.max}
 
+-Xdebug
+-Xrunjdwp:server=y,transport=dt_socket,address=4000,suspend=n
+
 ################################################################
 ## Expert settings
 ################################################################

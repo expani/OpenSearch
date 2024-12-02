@@ -33,6 +33,7 @@ public class SortedSetStarTreeValuesIterator extends StarTreeValuesIterator {
         return ((SortedSetDocValues) docIdSetIterator).nextOrd();
     }
 
+    @Override
     public int docValueCount() {
         return ((SortedSetDocValues) docIdSetIterator).docValueCount();
     }
@@ -45,6 +46,7 @@ public class SortedSetStarTreeValuesIterator extends StarTreeValuesIterator {
         return ((SortedSetDocValues) docIdSetIterator).getValueCount();
     }
 
+    // TODO : Use range(int, int) for range queries and aggregation.
     public long lookupTerm(BytesRef key) throws IOException {
         return ((SortedSetDocValues) docIdSetIterator).lookupTerm(key);
     }

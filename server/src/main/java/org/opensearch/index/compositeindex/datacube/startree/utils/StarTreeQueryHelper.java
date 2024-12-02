@@ -13,7 +13,9 @@ import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.search.CollectionTerminatedException;
 import org.apache.lucene.search.DocIdSetIterator;
+import org.apache.lucene.search.Query;
 import org.apache.lucene.util.FixedBitSet;
+import org.apache.lucene.util.NumericUtils;
 import org.opensearch.common.lucene.Lucene;
 import org.opensearch.index.codec.composite.CompositeIndexFieldInfo;
 import org.opensearch.index.codec.composite.CompositeIndexReader;
@@ -22,6 +24,7 @@ import org.opensearch.index.compositeindex.datacube.Metric;
 import org.opensearch.index.compositeindex.datacube.MetricStat;
 import org.opensearch.index.compositeindex.datacube.startree.index.StarTreeValues;
 import org.opensearch.index.compositeindex.datacube.startree.utils.iterator.SortedNumericStarTreeValuesIterator;
+import org.opensearch.index.compositeindex.datacube.startree.utils.iterator.SortedSetStarTreeValuesIterator;
 import org.opensearch.index.mapper.CompositeDataCubeFieldType;
 import org.opensearch.index.query.MatchAllQueryBuilder;
 import org.opensearch.index.query.QueryBuilder;
@@ -37,11 +40,15 @@ import org.opensearch.search.startree.StarTreeFilter;
 import org.opensearch.search.startree.StarTreeQueryContext;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+
+import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
 /**
  * Helper class for building star-tree query
@@ -73,6 +80,7 @@ public class StarTreeQueryHelper {
             compositeMappedFieldType.getCompositeIndexType()
         );
 
+        // TODO : Handle different types of validations in a better way
         for (AggregatorFactory aggregatorFactory : context.aggregations().factories().getFactories()) {
             MetricStat metricStat = validateStarTreeMetricSupport(compositeMappedFieldType, aggregatorFactory);
             if (metricStat == null) {
@@ -96,12 +104,17 @@ public class StarTreeQueryHelper {
         QueryBuilder queryBuilder,
         int cacheStarTreeValuesSize
     ) {
-        Map<String, Long> queryMap;
+
+        // TODO : Handle single valued keyword and IP field queries ( convert to ordinal )
+        // TODO : Also, handle multi-valued term aggregation and range query from low to high.
+        // TODO : Keep it extensible for boolean queries that can contain nested term and range query over separate fields.
+        Map<String, Object> queryMap;
         if (queryBuilder == null || queryBuilder instanceof MatchAllQueryBuilder) {
             queryMap = null;
         } else if (queryBuilder instanceof TermQueryBuilder) {
-            // TODO: Add support for keyword fields
-            if (compositeFieldType.getDimensions().stream().anyMatch(d -> d.getDocValuesType() != DocValuesType.SORTED_NUMERIC)) {
+            // TODO: Add support for keyword fields which has DocValuesType.SORTED_SET
+            // FIXME : This should also check if the non-numeric field is present in query or not.
+            if (compositeFieldType.getDimensions().stream().anyMatch(d -> d.getDocValuesType() != DocValuesType.SORTED_NUMERIC && d.getDocValuesType() != DocValuesType.SORTED_SET)) {
                 // return null for non-numeric fields
                 return null;
             }
@@ -117,7 +130,9 @@ public class StarTreeQueryHelper {
         } else {
             return null;
         }
-        return new StarTreeQueryContext(compositeIndexFieldInfo, queryMap, cacheStarTreeValuesSize);
+        StarTreeQueryContext starTreeQueryContext = new StarTreeQueryContext(compositeIndexFieldInfo, queryMap, cacheStarTreeValuesSize);
+        starTreeQueryContext.getFilterRegistry().registerQueryBuilder(queryBuilder);
+        return starTreeQueryContext;
     }
 
     /**
@@ -125,17 +140,23 @@ public class StarTreeQueryHelper {
      * @param queryBuilder to match star-tree supported query shape
      * @return predicates to match
      */
-    private static Map<String, Long> getStarTreePredicates(QueryBuilder queryBuilder, List<String> supportedDimensions) {
+    private static Map<String, Object> getStarTreePredicates(QueryBuilder queryBuilder, List<String> supportedDimensions) {
+        // TODO : Make this generic to handle range queries, boolean queries; etc.
         TermQueryBuilder tq = (TermQueryBuilder) queryBuilder;
         String field = tq.fieldName();
         if (!supportedDimensions.contains(field)) {
             return null;
         }
-        long inputQueryVal = Long.parseLong(tq.value().toString());
 
         // Create a map with the field and the value
-        Map<String, Long> predicateMap = new HashMap<>();
-        predicateMap.put(field, inputQueryVal);
+        Map<String, Object> predicateMap = new HashMap<>();
+        Object objValue = tq.value();
+        // Term query builder is returning Integer for int fields as expected.
+        // TODO : Properly handle conversion to long for other fields like keyword.
+        if (objValue instanceof Integer) {
+            objValue =((Integer) objValue).longValue();
+        }
+        predicateMap.put(field, objValue);
         return predicateMap;
     }
 
@@ -173,6 +194,19 @@ public class StarTreeQueryHelper {
         return (StarTreeValues) starTreeDocValuesReader.getCompositeIndexValues(starTree);
     }
 
+    private static void iterateOverMetric(String metricName, StarTreeValues starTreeValues) throws IOException {
+        SortedNumericStarTreeValuesIterator metricsIterator = (SortedNumericStarTreeValuesIterator) starTreeValues.getMetricValuesIterator(
+            metricName
+        );
+        int docId = 0;
+        List<Object> values = new ArrayList<>();
+        while (metricsIterator.advance(docId) != NO_MORE_DOCS) {
+            values.add(NumericUtils.sortableLongToDouble(metricsIterator.nextValue()));
+            docId++;
+        }
+        System.out.printf("Metric Values for metric %s has %s values and is %s%n", metricName, values.size(), values);
+    }
+
     /**
      * Get the star-tree leaf collector
      * This collector computes the aggregation prematurely and invokes an early termination collector
@@ -189,13 +223,16 @@ public class StarTreeQueryHelper {
     ) throws IOException {
         StarTreeValues starTreeValues = getStarTreeValues(ctx, starTree);
         assert starTreeValues != null;
+        // FIXME : Add support for fetching field name for keyword and IP value sources as well.
         String fieldName = ((ValuesSource.Numeric.FieldData) valuesSource).getIndexFieldName();
         String metricName = StarTreeUtils.fullyQualifiedFieldNameForStarTreeMetricsDocValues(starTree.getField(), fieldName, metric);
 
         assert starTreeValues != null;
+        // TODO : Handle for keyword, IP and other data types.
         SortedNumericStarTreeValuesIterator valuesIterator = (SortedNumericStarTreeValuesIterator) starTreeValues.getMetricValuesIterator(
             metricName
         );
+        iterateOverMetric(metricName, starTreeValues);
         // Obtain a FixedBitSet of matched star tree document IDs
         FixedBitSet filteredValues = getStarTreeFilteredValues(context, ctx, starTreeValues);
         assert filteredValues != null;
@@ -212,7 +249,8 @@ public class StarTreeQueryHelper {
                 }
 
                 // Iterate over the values for the current entryId
-                for (int i = 0, count = valuesIterator.entryValueCount(); i < count; i++) {
+                for (int i = 0, count = valuesIterator.docValueCount(); i < count; i++) {
+                    // TODO : Handle for keyword, IP and other data types ??
                     long value = valuesIterator.nextValue();
                     valueConsumer.accept(value); // Apply the consumer operation (e.g., max, sum)
                 }
@@ -240,6 +278,9 @@ public class StarTreeQueryHelper {
         throws IOException {
         FixedBitSet result = context.getStarTreeQueryContext().getStarTreeValues(ctx);
         if (result == null) {
+            // TODO : Consider passing ctx.reader().postings() for converting the non-numeric dimensions in queryMap for append-only indices.
+            // FIXME : Convert term bytesref to ordinals by performing a lookup using StarTreeValues here
+            // FIXME : Move the validation of metric support in aggregators and filter dimension ( mandatory ) support here.
             result = StarTreeFilter.getStarTreeResult(starTreeValues, context.getStarTreeQueryContext().getQueryMap());
             context.getStarTreeQueryContext().setStarTreeValues(ctx, result);
         }
