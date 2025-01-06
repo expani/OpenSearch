@@ -33,6 +33,7 @@
 package org.opensearch.search.aggregations;
 
 import org.opensearch.common.annotation.PublicApi;
+import org.opensearch.index.mapper.CompositeDataCubeFieldType;
 import org.opensearch.index.query.QueryShardContext;
 import org.opensearch.search.internal.SearchContext;
 
@@ -131,4 +132,13 @@ public abstract class AggregatorFactory {
     public AggregatorFactories getSubFactories() {
         return factories;
     }
+
+    /**
+     * Checks if an aggregation can be supported given the dimensions and metrics of a Star Tree Field
+     * @return : True, if supported.
+     */
+    public boolean validateStarTreeSupport(CompositeDataCubeFieldType compositeIndexFieldInfo) {
+        return false;
+    }
+
 }

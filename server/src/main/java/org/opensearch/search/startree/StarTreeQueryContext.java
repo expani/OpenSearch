@@ -12,10 +12,8 @@ import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.util.FixedBitSet;
 import org.opensearch.common.annotation.ExperimentalApi;
 import org.opensearch.index.codec.composite.CompositeIndexFieldInfo;
-import org.opensearch.index.query.QueryBuilder;
 
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * Query class for querying star tree data structure.
@@ -44,8 +42,6 @@ public class StarTreeQueryContext {
     */
     private final FixedBitSet[] starTreeValues;
 
-    private final StarTreeFilterRegistry filterRegistry;
-
     public StarTreeQueryContext(CompositeIndexFieldInfo starTree, Map<String, Object> queryMap, int numSegmentsCache) {
         this.starTree = starTree;
         this.queryMap = queryMap;
@@ -54,7 +50,6 @@ public class StarTreeQueryContext {
         } else {
             starTreeValues = null;
         }
-        filterRegistry = new StarTreeFilterRegistry();
     }
 
     public CompositeIndexFieldInfo getStarTree() {
@@ -63,10 +58,6 @@ public class StarTreeQueryContext {
 
     public Map<String, Object> getQueryMap() {
         return queryMap;
-    }
-
-    public StarTreeFilterRegistry getFilterRegistry() {
-        return filterRegistry;
     }
 
     public FixedBitSet[] getStarTreeValues() {

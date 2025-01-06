@@ -103,7 +103,4 @@ public abstract class ValuesSourceAggregatorFactory extends AggregatorFactory {
         return config.valueSourceType().typeName();
     }
 
-    public String getField() {
-        return config.fieldContext().field();
-    }
 }

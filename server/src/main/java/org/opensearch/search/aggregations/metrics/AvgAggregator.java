@@ -152,6 +152,7 @@ class AvgAggregator extends NumericMetricsAggregator.SingleValue {
         StarTreeValues starTreeValues = StarTreeQueryHelper.getStarTreeValues(ctx, starTree);
         assert starTreeValues != null;
 
+        // FIXME Handle for non-numeric fields as well
         String fieldName = ((ValuesSource.Numeric.FieldData) valuesSource).getIndexFieldName();
         String sumMetricName = StarTreeUtils.fullyQualifiedFieldNameForStarTreeMetricsDocValues(
             starTree.getField(),

@@ -13,18 +13,14 @@ import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.search.CollectionTerminatedException;
 import org.apache.lucene.search.DocIdSetIterator;
-import org.apache.lucene.search.Query;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.NumericUtils;
 import org.opensearch.common.lucene.Lucene;
 import org.opensearch.index.codec.composite.CompositeIndexFieldInfo;
 import org.opensearch.index.codec.composite.CompositeIndexReader;
 import org.opensearch.index.compositeindex.datacube.Dimension;
-import org.opensearch.index.compositeindex.datacube.Metric;
-import org.opensearch.index.compositeindex.datacube.MetricStat;
 import org.opensearch.index.compositeindex.datacube.startree.index.StarTreeValues;
 import org.opensearch.index.compositeindex.datacube.startree.utils.iterator.SortedNumericStarTreeValuesIterator;
-import org.opensearch.index.compositeindex.datacube.startree.utils.iterator.SortedSetStarTreeValuesIterator;
 import org.opensearch.index.mapper.CompositeDataCubeFieldType;
 import org.opensearch.index.query.MatchAllQueryBuilder;
 import org.opensearch.index.query.QueryBuilder;
@@ -44,7 +40,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -82,9 +77,11 @@ public class StarTreeQueryHelper {
 
         // TODO : Handle different types of validations in a better way
         for (AggregatorFactory aggregatorFactory : context.aggregations().factories().getFactories()) {
-            MetricStat metricStat = validateStarTreeMetricSupport(compositeMappedFieldType, aggregatorFactory);
-            if (metricStat == null) {
-                return null;
+            // All supported Star Tree aggregation extend @org.opensearch.search.aggregations.metrics.MetricAggregatorFactory
+            if (aggregatorFactory instanceof MetricAggregatorFactory) {
+                if (!(((MetricAggregatorFactory) aggregatorFactory).validateStarTreeSupport(compositeMappedFieldType))) {
+                    return null;
+                }
             }
         }
 
@@ -114,7 +111,9 @@ public class StarTreeQueryHelper {
         } else if (queryBuilder instanceof TermQueryBuilder) {
             // TODO: Add support for keyword fields which has DocValuesType.SORTED_SET
             // FIXME : This should also check if the non-numeric field is present in query or not.
-            if (compositeFieldType.getDimensions().stream().anyMatch(d -> d.getDocValuesType() != DocValuesType.SORTED_NUMERIC && d.getDocValuesType() != DocValuesType.SORTED_SET)) {
+            if (compositeFieldType.getDimensions()
+                .stream()
+                .anyMatch(d -> d.getDocValuesType() != DocValuesType.SORTED_NUMERIC && d.getDocValuesType() != DocValuesType.SORTED_SET)) {
                 // return null for non-numeric fields
                 return null;
             }
@@ -130,9 +129,7 @@ public class StarTreeQueryHelper {
         } else {
             return null;
         }
-        StarTreeQueryContext starTreeQueryContext = new StarTreeQueryContext(compositeIndexFieldInfo, queryMap, cacheStarTreeValuesSize);
-        starTreeQueryContext.getFilterRegistry().registerQueryBuilder(queryBuilder);
-        return starTreeQueryContext;
+        return new StarTreeQueryContext(compositeIndexFieldInfo, queryMap, cacheStarTreeValuesSize);
     }
 
     /**
@@ -154,30 +151,10 @@ public class StarTreeQueryHelper {
         // Term query builder is returning Integer for int fields as expected.
         // TODO : Properly handle conversion to long for other fields like keyword.
         if (objValue instanceof Integer) {
-            objValue =((Integer) objValue).longValue();
+            objValue = ((Integer) objValue).longValue();
         }
         predicateMap.put(field, objValue);
         return predicateMap;
-    }
-
-    private static MetricStat validateStarTreeMetricSupport(
-        CompositeDataCubeFieldType compositeIndexFieldInfo,
-        AggregatorFactory aggregatorFactory
-    ) {
-        if (aggregatorFactory instanceof MetricAggregatorFactory && aggregatorFactory.getSubFactories().getFactories().length == 0) {
-            String field;
-            Map<String, List<MetricStat>> supportedMetrics = compositeIndexFieldInfo.getMetrics()
-                .stream()
-                .collect(Collectors.toMap(Metric::getField, Metric::getMetrics));
-
-            MetricStat metricStat = ((MetricAggregatorFactory) aggregatorFactory).getMetricStat();
-            field = ((MetricAggregatorFactory) aggregatorFactory).getField();
-
-            if (supportedMetrics.containsKey(field) && supportedMetrics.get(field).contains(metricStat)) {
-                return metricStat;
-            }
-        }
-        return null;
     }
 
     public static CompositeIndexFieldInfo getSupportedStarTree(SearchContext context) {
@@ -278,7 +255,8 @@ public class StarTreeQueryHelper {
         throws IOException {
         FixedBitSet result = context.getStarTreeQueryContext().getStarTreeValues(ctx);
         if (result == null) {
-            // TODO : Consider passing ctx.reader().postings() for converting the non-numeric dimensions in queryMap for append-only indices.
+            // TODO : Consider passing ctx.reader().postings() for converting the non-numeric dimensions in queryMap for append-only
+            // indices.
             // FIXME : Convert term bytesref to ordinals by performing a lookup using StarTreeValues here
             // FIXME : Move the validation of metric support in aggregators and filter dimension ( mandatory ) support here.
             result = StarTreeFilter.getStarTreeResult(starTreeValues, context.getStarTreeQueryContext().getQueryMap());

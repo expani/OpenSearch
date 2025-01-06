@@ -79,7 +79,9 @@ public class StarTreeFilter {
             logger.debug("remainingPredicateColumn : {}, maxMatchedDoc : {} ", remainingPredicateColumn, starTreeResult.maxMatchedDoc);
 
             // TODO : Handle keyword, IP data types
-            SortedNumericStarTreeValuesIterator ndv = (SortedNumericStarTreeValuesIterator) starTreeValues.getDimensionValuesIterator(remainingPredicateColumn);
+            SortedNumericStarTreeValuesIterator ndv = (SortedNumericStarTreeValuesIterator) starTreeValues.getDimensionValuesIterator(
+                remainingPredicateColumn
+            );
 
             // TODO : Handle keyword, IP data types and range queries.
             long queryValue = (long) queryMap.get(remainingPredicateColumn); // Get the query value directly
@@ -100,11 +102,11 @@ public class StarTreeFilter {
                             // iterator.
                             // Compare the value with the query value
                             if (value == queryValue) {
-                            // TODO : Handle keyword, IP data types while performing match.
-                            // TODO : Handle range queries or any query type by passing "queryValue" to an interface
-                            // TODO : Moving the logic of deciding a match away from here and based on underlying query
-                            // TODO : builder and field datatype.
-                            // TODO : Call matchNextValue(Object queryValue) here
+                                // TODO : Handle keyword, IP data types while performing match.
+                                // TODO : Handle range queries or any query type by passing "queryValue" to an interface
+                                // TODO : Moving the logic of deciding a match away from here and based on underlying query
+                                // TODO : builder and field datatype.
+                                // TODO : Call matchNextValue(Object queryValue) here
                                 tempBitSet.set(entryId);  // Set bit for the matching entryId
                                 break;  // No need to check other values for this entryId
                             }
@@ -221,7 +223,7 @@ public class StarTreeFilter {
 
     // TODO : Remove after Draft PR
     private static void iterateOverAllDimensionValues(StarTreeValues starTreeValues) throws IOException {
-        String[] dimensionNames = new String[]{"verb", "status", "port", "response_code"};
+        String[] dimensionNames = new String[] { "verb", "status", "port", "response_code" };
         for (String dimensionName : dimensionNames) {
             StarTreeValuesIterator starTreeValuesIterator = starTreeValues.getDimensionValuesIterator(dimensionName);
             int docId = 0;
@@ -243,7 +245,13 @@ public class StarTreeFilter {
                 }
                 docId++;
             }
-            System.out.printf("Dimension Values for dimension %s has size %s and are %s and docIds are %s", dimensionName, values.size(), values, docIds);
+            System.out.printf(
+                "Dimension Values for dimension %s has size %s and are %s and docIds are %s",
+                dimensionName,
+                values.size(),
+                values,
+                docIds
+            );
         }
     }
 
