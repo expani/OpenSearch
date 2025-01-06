@@ -28,7 +28,6 @@ import org.opensearch.index.query.TermQueryBuilder;
 import org.opensearch.search.aggregations.AggregatorFactory;
 import org.opensearch.search.aggregations.LeafBucketCollector;
 import org.opensearch.search.aggregations.LeafBucketCollectorBase;
-import org.opensearch.search.aggregations.metrics.MetricAggregatorFactory;
 import org.opensearch.search.aggregations.support.ValuesSource;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.search.internal.SearchContext;
@@ -77,11 +76,8 @@ public class StarTreeQueryHelper {
 
         // TODO : Handle different types of validations in a better way
         for (AggregatorFactory aggregatorFactory : context.aggregations().factories().getFactories()) {
-            // All supported Star Tree aggregation extend @org.opensearch.search.aggregations.metrics.MetricAggregatorFactory
-            if (aggregatorFactory instanceof MetricAggregatorFactory) {
-                if (!(((MetricAggregatorFactory) aggregatorFactory).validateStarTreeSupport(compositeMappedFieldType))) {
-                    return null;
-                }
+            if (!aggregatorFactory.validateStarTreeSupport(compositeMappedFieldType)) {
+                return null;
             }
         }
 
