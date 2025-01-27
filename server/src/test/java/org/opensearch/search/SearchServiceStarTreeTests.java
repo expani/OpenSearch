@@ -16,16 +16,27 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.common.util.FeatureFlags;
 import org.opensearch.core.common.Strings;
 import org.opensearch.index.IndexService;
-import org.opensearch.index.codec.composite.CompositeIndexFieldInfo;
 import org.opensearch.index.compositeindex.CompositeIndexSettings;
+import org.opensearch.index.compositeindex.datacube.Dimension;
+import org.opensearch.index.compositeindex.datacube.Metric;
+import org.opensearch.index.compositeindex.datacube.MetricStat;
+import org.opensearch.index.compositeindex.datacube.OrdinalDimension;
+import org.opensearch.index.compositeindex.datacube.startree.StarTreeField;
+import org.opensearch.index.compositeindex.datacube.startree.StarTreeFieldConfiguration;
 import org.opensearch.index.compositeindex.datacube.startree.StarTreeIndexSettings;
-import org.opensearch.index.mapper.CompositeMappedFieldType;
+import org.opensearch.index.mapper.CompositeDataCubeFieldType;
+import org.opensearch.index.mapper.StarTreeMapper;
 import org.opensearch.index.query.MatchAllQueryBuilder;
+import org.opensearch.index.query.QueryBuilder;
 import org.opensearch.index.query.TermQueryBuilder;
 import org.opensearch.index.shard.IndexShard;
 import org.opensearch.indices.IndicesService;
 import org.opensearch.search.aggregations.AggregationBuilders;
+import org.opensearch.search.aggregations.AggregatorFactories;
+import org.opensearch.search.aggregations.AggregatorFactory;
+import org.opensearch.search.aggregations.SearchContextAggregations;
 import org.opensearch.search.aggregations.startree.StarTreeFilterTests;
+import org.opensearch.search.aggregations.support.ValuesSourceAggregationBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.search.internal.AliasFilter;
 import org.opensearch.search.internal.ReaderContext;
@@ -35,10 +46,13 @@ import org.opensearch.search.startree.StarTreeQueryContext;
 import org.opensearch.test.OpenSearchSingleNodeTestCase;
 
 import java.io.IOException;
-import java.util.Map;
+import java.util.Collections;
+import java.util.List;
 
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.CoreMatchers.nullValue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class SearchServiceStarTreeTests extends OpenSearchSingleNodeTestCase {
 
@@ -55,7 +69,14 @@ public class SearchServiceStarTreeTests extends OpenSearchSingleNodeTestCase {
             .indices()
             .prepareCreate("test")
             .setSettings(settings)
-            .setMapping(StarTreeFilterTests.getExpandedMapping(1, false));
+            .setMapping(
+                StarTreeFilterTests.getExpandedMapping(
+                    1,
+                    false,
+                    StarTreeFilterTests.DIMENSION_TYPE_MAP,
+                    StarTreeFilterTests.METRIC_TYPE_MAP
+                )
+            );
         createIndex("test", builder);
 
         IndicesService indicesService = getInstanceFromNode(IndicesService.class);
@@ -73,6 +94,14 @@ public class SearchServiceStarTreeTests extends OpenSearchSingleNodeTestCase {
             null
         );
 
+        QueryBuilder baseQuery;
+        SearchContext searchContext = createSearchContext(indexService);
+        StarTreeFieldConfiguration starTreeFieldConfiguration = new StarTreeFieldConfiguration(
+            1,
+            Collections.emptySet(),
+            StarTreeFieldConfiguration.StarTreeBuildMode.ON_HEAP
+        );
+
         // Case 1: No query or aggregations, should not use star tree
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
         assertStarTreeContext(request, sourceBuilder, null, -1);
@@ -82,15 +111,24 @@ public class SearchServiceStarTreeTests extends OpenSearchSingleNodeTestCase {
         assertStarTreeContext(request, sourceBuilder, null, -1);
 
         // Case 3: MatchAllQuery and aggregations present, should use star tree
-        sourceBuilder = new SearchSourceBuilder().size(0)
-            .query(new MatchAllQueryBuilder())
-            .aggregation(AggregationBuilders.max("test").field("field"));
-        CompositeIndexFieldInfo expectedStarTree = new CompositeIndexFieldInfo(
-            "startree",
-            CompositeMappedFieldType.CompositeFieldType.STAR_TREE
+        baseQuery = new MatchAllQueryBuilder();
+        sourceBuilder = new SearchSourceBuilder().size(0).query(baseQuery).aggregation(AggregationBuilders.max("test").field("field"));
+        assertStarTreeContext(
+            request,
+            sourceBuilder,
+            getStarTreeQueryContext(
+                searchContext,
+                starTreeFieldConfiguration,
+                "startree",
+                -1,
+                List.of(),
+                List.of(new Metric("field", List.of(MetricStat.MAX))),
+                baseQuery,
+                sourceBuilder,
+                true
+            ),
+            -1
         );
-        Map<String, Long> expectedQueryMap = null;
-        assertStarTreeContext(request, sourceBuilder, new StarTreeQueryContext(expectedStarTree, expectedQueryMap, -1), -1);
 
         // Case 4: MatchAllQuery and aggregations present, but postFilter specified, should not use star tree
         sourceBuilder = new SearchSourceBuilder().size(0)
@@ -100,25 +138,69 @@ public class SearchServiceStarTreeTests extends OpenSearchSingleNodeTestCase {
         assertStarTreeContext(request, sourceBuilder, null, -1);
 
         // Case 5: TermQuery and single aggregation, should use star tree, but not initialize query cache
-        sourceBuilder = new SearchSourceBuilder().size(0)
-            .query(new TermQueryBuilder("sndv", 1))
-            .aggregation(AggregationBuilders.max("test").field("field"));
-        expectedQueryMap = Map.of("sndv", 1L);
-        assertStarTreeContext(request, sourceBuilder, new StarTreeQueryContext(expectedStarTree, expectedQueryMap, -1), -1);
+        baseQuery = new TermQueryBuilder("sndv", 1);
+        sourceBuilder = new SearchSourceBuilder().size(0).query(baseQuery).aggregation(AggregationBuilders.max("test").field("field"));
+        assertStarTreeContext(
+            request,
+            sourceBuilder,
+            getStarTreeQueryContext(
+                searchContext,
+                starTreeFieldConfiguration,
+                "startree",
+                -1,
+                List.of(new OrdinalDimension("sndv")),
+                List.of(new Metric("field", List.of(MetricStat.MAX))),
+                baseQuery,
+                sourceBuilder,
+                true
+            ),
+            -1
+        );
 
         // Case 6: TermQuery and multiple aggregations present, should use star tree & initialize cache
+        baseQuery = new TermQueryBuilder("sndv", 1);
         sourceBuilder = new SearchSourceBuilder().size(0)
-            .query(new TermQueryBuilder("sndv", 1))
+            .query(baseQuery)
             .aggregation(AggregationBuilders.max("test").field("field"))
             .aggregation(AggregationBuilders.sum("test2").field("field"));
-        expectedQueryMap = Map.of("sndv", 1L);
-        assertStarTreeContext(request, sourceBuilder, new StarTreeQueryContext(expectedStarTree, expectedQueryMap, 0), 0);
+        assertStarTreeContext(
+            request,
+            sourceBuilder,
+            getStarTreeQueryContext(
+                searchContext,
+                starTreeFieldConfiguration,
+                "startree",
+                -1,
+                List.of(new OrdinalDimension("sndv")),
+                List.of(new Metric("field", List.of(MetricStat.MAX, MetricStat.SUM))),
+                baseQuery,
+                sourceBuilder,
+                true
+            ),
+            0
+        );
 
         // Case 7: No query, metric aggregations present, should use star tree
         sourceBuilder = new SearchSourceBuilder().size(0).aggregation(AggregationBuilders.max("test").field("field"));
-        assertStarTreeContext(request, sourceBuilder, new StarTreeQueryContext(expectedStarTree, null, -1), -1);
+        assertStarTreeContext(
+            request,
+            sourceBuilder,
+            getStarTreeQueryContext(
+                searchContext,
+                starTreeFieldConfiguration,
+                "startree",
+                -1,
+                List.of(new OrdinalDimension("sndv")),
+                List.of(new Metric("field", List.of(MetricStat.MAX))),
+                null,
+                sourceBuilder,
+                true
+            ),
+            -1
+        );
 
         setStarTreeIndexSetting(null);
+        searchContext.close();
     }
 
     private void setStarTreeIndexSetting(String value) throws IOException {
@@ -139,15 +221,18 @@ public class SearchServiceStarTreeTests extends OpenSearchSingleNodeTestCase {
         SearchService searchService = getInstanceFromNode(SearchService.class);
         try (ReaderContext reader = searchService.createOrGetReaderContext(request, false)) {
             SearchContext context = searchService.createContext(reader, request, null, true);
-            StarTreeQueryContext actualContext = context.getStarTreeQueryContext();
+            StarTreeQueryContext actualContext = context.getQueryShardContext().getStarTreeQueryContext();
 
             if (expectedContext == null) {
-                assertThat(context.getStarTreeQueryContext(), nullValue());
+                assertThat(context.getQueryShardContext().getStarTreeQueryContext(), nullValue());
             } else {
                 assertThat(actualContext, notNullValue());
                 assertEquals(expectedContext.getStarTree().getType(), actualContext.getStarTree().getType());
                 assertEquals(expectedContext.getStarTree().getField(), actualContext.getStarTree().getField());
-                assertEquals(expectedContext.getQueryMap(), actualContext.getQueryMap());
+                assertEquals(
+                    expectedContext.getBaseQueryStarTreeFilter().getDimensions(),
+                    actualContext.getBaseQueryStarTreeFilter().getDimensions()
+                );
                 if (expectedCacheUsage > -1) {
                     assertEquals(expectedCacheUsage, actualContext.getStarTreeValues().length);
                 } else {
@@ -156,5 +241,40 @@ public class SearchServiceStarTreeTests extends OpenSearchSingleNodeTestCase {
             }
             searchService.doStop();
         }
+    }
+
+    private StarTreeQueryContext getStarTreeQueryContext(
+        SearchContext searchContext,
+        StarTreeFieldConfiguration starTreeFieldConfiguration,
+        String compositeFieldName,
+        int cacheSize,
+        List<Dimension> dimensions,
+        List<Metric> metrics,
+        QueryBuilder baseQuery,
+        SearchSourceBuilder sourceBuilder,
+        boolean assertConsolidation
+    ) {
+        AggregatorFactories aggregatorFactories = mock(AggregatorFactories.class);
+        AggregatorFactory[] aggregatorFactoriesArray = sourceBuilder.aggregations().getAggregatorFactories().stream().map(af -> {
+            try {
+                return ((ValuesSourceAggregationBuilder<?>) af).build(searchContext.getQueryShardContext(), null);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }).toArray(AggregatorFactory[]::new);
+        when(aggregatorFactories.getFactories()).thenReturn(aggregatorFactoriesArray);
+        SearchContextAggregations mockAggregations = mock(SearchContextAggregations.class);
+        when(mockAggregations.factories()).thenReturn(aggregatorFactories);
+        searchContext.aggregations(mockAggregations);
+        CompositeDataCubeFieldType compositeDataCubeFieldType = new StarTreeMapper.StarTreeFieldType(
+            compositeFieldName,
+            new StarTreeField(compositeFieldName, dimensions, metrics, starTreeFieldConfiguration)
+        );
+        StarTreeQueryContext starTreeQueryContext = new StarTreeQueryContext(compositeDataCubeFieldType, baseQuery, cacheSize);
+        boolean consolidated = starTreeQueryContext.consolidateAllFilters(searchContext);
+        if (assertConsolidation) {
+            assertTrue(consolidated);
+        }
+        return starTreeQueryContext;
     }
 }
