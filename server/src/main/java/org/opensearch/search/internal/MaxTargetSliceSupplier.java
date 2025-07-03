@@ -31,6 +31,10 @@ final class MaxTargetSliceSupplier {
             throw new IllegalArgumentException("MaxTargetSliceSupplier called with unexpected slice count of " + targetMaxSlice);
         }
 
+        if (leaves.size() == 1) {
+            return getSlicesForOneLeaf(leaves.get(0));
+        }
+
         // slice count should not exceed the segment count
         int targetSliceCount = Math.min(targetMaxSlice, leaves.size());
 
@@ -52,4 +56,13 @@ final class MaxTargetSliceSupplier {
 
         return groupedLeaves.stream().map(IndexSearcher.LeafSlice::new).toArray(IndexSearcher.LeafSlice[]::new);
     }
+
+    private static IndexSearcher.LeafSlice[] getSlicesForOneLeaf(LeafReaderContext leaf) {
+        int maxDoc = leaf.reader().maxDoc();
+        IndexSearcher.LeafSlice[] slices = new IndexSearcher.LeafSlice[2];
+        slices[0] = new IndexSearcher.LeafSlice(Collections.singletonList(IndexSearcher.LeafReaderContextPartition.createFromAndTo(leaf, 0, maxDoc / 2)));
+        slices[1] = new IndexSearcher.LeafSlice(Collections.singletonList(IndexSearcher.LeafReaderContextPartition.createFromAndTo(leaf, maxDoc/2, maxDoc + 1)));
+        return slices;
+    }
+
 }
