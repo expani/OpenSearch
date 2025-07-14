@@ -32,7 +32,7 @@ final class MaxTargetSliceSupplier {
         }
 
         if (leaves.size() == 1) {
-            return getSlicesForOneLeaf(leaves.get(0));
+            return getSlicesForOneLeaf(leaves.getFirst());
         }
 
         // slice count should not exceed the segment count
@@ -61,7 +61,7 @@ final class MaxTargetSliceSupplier {
         int maxDoc = leaf.reader().maxDoc();
         IndexSearcher.LeafSlice[] slices = new IndexSearcher.LeafSlice[2];
         slices[0] = new IndexSearcher.LeafSlice(Collections.singletonList(IndexSearcher.LeafReaderContextPartition.createFromAndTo(leaf, 0, maxDoc / 2)));
-        slices[1] = new IndexSearcher.LeafSlice(Collections.singletonList(IndexSearcher.LeafReaderContextPartition.createFromAndTo(leaf, maxDoc/2, maxDoc + 1)));
+        slices[1] = new IndexSearcher.LeafSlice(Collections.singletonList(IndexSearcher.LeafReaderContextPartition.createFromAndTo(leaf, maxDoc/2, maxDoc)));
         return slices;
     }
 
