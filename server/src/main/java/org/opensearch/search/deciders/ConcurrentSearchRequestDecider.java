@@ -43,6 +43,10 @@ public abstract class ConcurrentSearchRequestDecider {
      */
     public abstract ConcurrentSearchDecision getConcurrentSearchDecision();
 
+    public ConcurrentSearchDecision getIntraSegmentConcurrentSearchDecision() {
+        return null;
+    }
+
     /**
      * Factory interface that can be implemented to create the ConcurrentSearchRequestDecider object.
      * Implementations can use the passed in indexSettings to decide whether to create the decider object or

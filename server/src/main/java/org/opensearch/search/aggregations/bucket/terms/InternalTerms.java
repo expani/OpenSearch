@@ -516,6 +516,7 @@ public abstract class InternalTerms<A extends InternalTerms<A, B>, B extends Int
         if (reduceContext.isSliceLevel()) {
             Arrays.sort(list, thisReduceOrder.comparator());
         }
+        System.out.println("Doc count in reduce: " + docCountError);
         return create(name, Arrays.asList(list), reduceContext.isFinalReduce() ? order : thisReduceOrder, docCountError, otherDocCount);
     }
 

@@ -36,7 +36,9 @@ public class ConcurrentSearchVisitor implements QueryBuilderVisitor {
     @Override
     public void accept(QueryBuilder qb) {
         // for each of the deciders, invoke evaluateForQuery using the current query builder and index settings.
-        deciders.forEach(concurrentSearchDecider -> { concurrentSearchDecider.evaluateForQuery(qb, indexSettings); });
+        deciders.forEach(concurrentSearchDecider -> {
+            concurrentSearchDecider.evaluateForQuery(qb, indexSettings);
+        });
     }
 
     @Override

@@ -268,6 +268,15 @@ public class AggregatorFactories {
         return true;
     }
 
+    public boolean allFactoriesSupportIntraSegmentConcurrentSearch() {
+        for (AggregatorFactory factory : factories) {
+            if (factory.supportsIntraSegmentConcurrentSearch() == false || factory.evaluateChildFactoriesForIntraSegmentConcurrentSearch() == false) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /**
      * Create all aggregators so that they can be consumed with multiple
      * buckets.

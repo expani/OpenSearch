@@ -433,6 +433,10 @@ public abstract class SearchContext implements Releasable {
         return false;
     }
 
+    public boolean shouldUseIntraSegmentConcurrentSearch() {
+        return false;
+    }
+
     /**
      * Returns local bucket count thresholds based on concurrent segment search status
      */
@@ -518,6 +522,10 @@ public abstract class SearchContext implements Releasable {
     public abstract int getTargetMaxSliceCount();
 
     public abstract boolean shouldUseTimeSeriesDescSortOptimization();
+
+    public int getIntraSegmentPartitionSize() {
+        return Integer.MAX_VALUE; // Kept high to not split by default.
+    }
 
     public boolean getStarTreeIndexEnabled() {
         return false;

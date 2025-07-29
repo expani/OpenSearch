@@ -268,6 +268,32 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
         Property.Deprecated
     );
 
+    public enum ConcurrentSearchMode {
+        ALL("all"),
+        NONE("none"),
+        AUTO("auto");
+
+        private final String name;
+
+        ConcurrentSearchMode(String name) {
+            this.name = name;
+        }
+
+        public static ConcurrentSearchMode fromValue(String value) {
+            return switch (value.trim().toLowerCase()) {
+                case "all" -> ALL;
+                case "none" -> NONE;
+                case "auto" -> AUTO;
+                default -> throw new IllegalArgumentException("Setting value must be one of [all, none, auto]");
+            };
+        }
+
+        public String getName() {
+            return name;
+        }
+    }
+
+    // FIXME Remove these constants to use the enum
     // Allow concurrent segment search for all requests
     public static final String CONCURRENT_SEGMENT_SEARCH_MODE_ALL = "all";
 
@@ -309,6 +335,29 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
         Property.Dynamic,
         Property.NodeScope
     );
+
+    public static final String CONCURRENT_INTRA_SEGMENT_SEARCH_MODE_KEY = "search.concurrent_intra_segment.mode";
+    public static final String CONCURRENT_INTRA_SEGMENT_SEARCH_SEGMENT_PARTITION_SIZE_KEY =
+        "search.concurrent_intra_segment.partition_size";
+    public static final int CONCURRENT_INTRA_SEGMENT_SEARCH_PARTITION_SIZE_DEFAULT = 100_000;
+    public static final int CONCURRENT_INTRA_SEGMENT_SEARCH_PARTITION_SIZE_MIN = 2;
+
+    public static final Setting<String> CONCURRENT_INTRA_SEGMENT_SEARCH_MODE_SETTING = Setting.simpleString(
+        CONCURRENT_INTRA_SEGMENT_SEARCH_MODE_KEY,
+        ConcurrentSearchMode.NONE.name,
+        ConcurrentSearchMode::fromValue,
+        Property.Dynamic,
+        Property.NodeScope
+    );
+
+    public static final Setting<Integer> CONCURRENT_INTRA_SEGMENT_SEARCH_SEGMENT_PARTITION_SIZE_SETTING = Setting.intSetting(
+        CONCURRENT_INTRA_SEGMENT_SEARCH_SEGMENT_PARTITION_SIZE_KEY,
+        CONCURRENT_INTRA_SEGMENT_SEARCH_PARTITION_SIZE_DEFAULT,
+        CONCURRENT_INTRA_SEGMENT_SEARCH_PARTITION_SIZE_MIN,
+        Property.Dynamic,
+        Property.NodeScope
+    );
+
     // value 0 means rewrite filters optimization in aggregations will be disabled
     @ExperimentalApi
     public static final Setting<Integer> MAX_AGGREGATION_REWRITE_FILTERS = Setting.intSetting(

@@ -57,6 +57,7 @@ import org.opensearch.indices.replication.common.ReplicationType;
 import org.opensearch.ingest.IngestService;
 import org.opensearch.node.Node;
 import org.opensearch.node.remotestore.RemoteStoreNodeAttribute;
+import org.opensearch.search.SearchService;
 import org.opensearch.search.pipeline.SearchPipelineService;
 
 import java.util.Arrays;
@@ -78,11 +79,10 @@ import static org.opensearch.index.mapper.MapperService.INDEX_MAPPING_NESTED_DOC
 import static org.opensearch.index.mapper.MapperService.INDEX_MAPPING_NESTED_FIELDS_LIMIT_SETTING;
 import static org.opensearch.index.mapper.MapperService.INDEX_MAPPING_TOTAL_FIELDS_LIMIT_SETTING;
 import static org.opensearch.index.store.remote.directory.RemoteSnapshotDirectory.SEARCHABLE_SNAPSHOT_EXTENDED_COMPATIBILITY_MINIMUM_VERSION;
+import static org.opensearch.search.SearchService.CONCURRENT_INTRA_SEGMENT_SEARCH_PARTITION_SIZE_DEFAULT;
+import static org.opensearch.search.SearchService.CONCURRENT_INTRA_SEGMENT_SEARCH_PARTITION_SIZE_MIN;
 import static org.opensearch.search.SearchService.CONCURRENT_SEGMENT_SEARCH_DEFAULT_SLICE_COUNT_VALUE;
 import static org.opensearch.search.SearchService.CONCURRENT_SEGMENT_SEARCH_MIN_SLICE_COUNT_VALUE;
-import static org.opensearch.search.SearchService.CONCURRENT_SEGMENT_SEARCH_MODE_ALL;
-import static org.opensearch.search.SearchService.CONCURRENT_SEGMENT_SEARCH_MODE_AUTO;
-import static org.opensearch.search.SearchService.CONCURRENT_SEGMENT_SEARCH_MODE_NONE;
 
 /**
  * This class encapsulates all index level settings and handles settings updates.
@@ -709,18 +709,8 @@ public final class IndexSettings {
 
     public static final Setting<String> INDEX_CONCURRENT_SEGMENT_SEARCH_MODE = Setting.simpleString(
         "index.search.concurrent_segment_search.mode",
-        CONCURRENT_SEGMENT_SEARCH_MODE_NONE,
-        value -> {
-            switch (value) {
-                case CONCURRENT_SEGMENT_SEARCH_MODE_ALL:
-                case CONCURRENT_SEGMENT_SEARCH_MODE_NONE:
-                case CONCURRENT_SEGMENT_SEARCH_MODE_AUTO:
-                    // valid setting
-                    break;
-                default:
-                    throw new IllegalArgumentException("Setting value must be one of [all, none, auto]");
-            }
-        },
+        SearchService.ConcurrentSearchMode.NONE.getName(),
+        SearchService.ConcurrentSearchMode::fromValue,
         Property.Dynamic,
         Property.IndexScope
     );
@@ -729,6 +719,22 @@ public final class IndexSettings {
         "index.search.concurrent.max_slice_count",
         CONCURRENT_SEGMENT_SEARCH_DEFAULT_SLICE_COUNT_VALUE,
         CONCURRENT_SEGMENT_SEARCH_MIN_SLICE_COUNT_VALUE,
+        Property.Dynamic,
+        Property.IndexScope
+    );
+
+    public static final Setting<String> INDEX_CONCURRENT_INTRA_SEGMENT_SEARCH_MODE = Setting.simpleString(
+        "index.search.concurrent.intra.segment_search.mode",
+        SearchService.ConcurrentSearchMode.NONE.getName(),
+        SearchService.ConcurrentSearchMode::fromValue,
+        Property.Dynamic,
+        Property.IndexScope
+    );
+
+    public static final Setting<Integer> INDEX_CONCURRENT_INTRA_SEGMENT_PARTITION_SIZE = Setting.intSetting(
+        "index.search.concurrent.intra.segment_split_size",
+        CONCURRENT_INTRA_SEGMENT_SEARCH_PARTITION_SIZE_DEFAULT,
+        CONCURRENT_INTRA_SEGMENT_SEARCH_PARTITION_SIZE_MIN,
         Property.Dynamic,
         Property.IndexScope
     );

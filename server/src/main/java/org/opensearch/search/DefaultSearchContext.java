@@ -123,6 +123,7 @@ import static org.opensearch.search.SearchService.AGGREGATION_REWRITE_FILTER_SEG
 import static org.opensearch.search.SearchService.CARDINALITY_AGGREGATION_PRUNING_THRESHOLD;
 import static org.opensearch.search.SearchService.CLUSTER_CONCURRENT_SEGMENT_SEARCH_MODE;
 import static org.opensearch.search.SearchService.CLUSTER_CONCURRENT_SEGMENT_SEARCH_SETTING;
+import static org.opensearch.search.SearchService.CONCURRENT_INTRA_SEGMENT_SEARCH_MODE_SETTING;
 import static org.opensearch.search.SearchService.CONCURRENT_SEGMENT_SEARCH_MODE_ALL;
 import static org.opensearch.search.SearchService.CONCURRENT_SEGMENT_SEARCH_MODE_AUTO;
 import static org.opensearch.search.SearchService.CONCURRENT_SEGMENT_SEARCH_MODE_NONE;
@@ -211,6 +212,8 @@ final class DefaultSearchContext extends SearchContext {
     private final Function<SearchSourceBuilder, InternalAggregation.ReduceContextBuilder> requestToAggReduceContextBuilder;
     private final String concurrentSearchMode;
     private final SetOnce<Boolean> requestShouldUseConcurrentSearch = new SetOnce<>();
+    private final SearchService.ConcurrentSearchMode intraSegmentConcurrentSearchMode;
+    private final SetOnce<Boolean> requestShouldUseIntraSegmentConcurrentSearch = new SetOnce<>();
     private final int maxAggRewriteFilters;
     private final int filterRewriteSegmentThreshold;
     private final int cardinalityAggregationPruningThreshold;
@@ -257,6 +260,7 @@ final class DefaultSearchContext extends SearchContext {
                 || concurrentSearchMode.equals(CONCURRENT_SEGMENT_SEARCH_MODE_ALL) ? executor : null,
             this
         );
+        this.intraSegmentConcurrentSearchMode = evaluateIntraSegmentConcurrentSearchMode(executor);
         this.relativeTimeSupplier = relativeTimeSupplier;
         this.timeout = timeout;
         this.minNodeVersion = minNodeVersion;
@@ -938,7 +942,7 @@ final class DefaultSearchContext extends SearchContext {
             && Boolean.TRUE.equals(requestShouldUseConcurrentSearch.get());
     }
 
-    private boolean evaluateAutoMode() {
+    private boolean evaluateAutoMode(boolean evaluateIntraSegment) {
 
         final Set<ConcurrentSearchRequestDecider> concurrentSearchRequestDeciders = new HashSet<>();
 
@@ -965,12 +969,22 @@ final class DefaultSearchContext extends SearchContext {
 
         final List<ConcurrentSearchDecision> decisions = new ArrayList<>();
         for (ConcurrentSearchRequestDecider decider : concurrentSearchRequestDeciders) {
-            ConcurrentSearchDecision decision = decider.getConcurrentSearchDecision();
-            if (decision != null) {
-                if (logger.isDebugEnabled()) {
-                    logger.debug("concurrent search decision from plugin decider [{}]", decision.toString());
+            if (evaluateIntraSegment) {
+                ConcurrentSearchDecision intraSegmentConcurrentSearchDecision = decider.getIntraSegmentConcurrentSearchDecision();
+                if (intraSegmentConcurrentSearchDecision != null) {
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("Intra Segment concurrent search decision from plugin decider [{}]", intraSegmentConcurrentSearchDecision.toString());
+                    }
+                    decisions.add(intraSegmentConcurrentSearchDecision);
                 }
-                decisions.add(decision);
+            } else {
+                ConcurrentSearchDecision decision = decider.getConcurrentSearchDecision();
+                if (decision != null) {
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("concurrent search decision from plugin decider [{}]", decision.toString());
+                    }
+                    decisions.add(decision);
+                }
             }
         }
 
@@ -1012,10 +1026,26 @@ final class DefaultSearchContext extends SearchContext {
             } else if (terminateAfter != DEFAULT_TERMINATE_AFTER) {
                 requestShouldUseConcurrentSearch.set(false);
             } else if (concurrentSearchMode.equals(CONCURRENT_SEGMENT_SEARCH_MODE_AUTO)) {
-                requestShouldUseConcurrentSearch.set(evaluateAutoMode());
+                requestShouldUseConcurrentSearch.set(evaluateAutoMode(false));
             } else {
                 requestShouldUseConcurrentSearch.set(true);
             }
+    }
+
+    public void evaluateRequestShouldUseIntraSegmentConcurrentSearch() {
+        if (sort != null && sort.isSortOnTimeSeriesField()) {
+            requestShouldUseIntraSegmentConcurrentSearch.set(false);
+        } else if (aggregations() != null
+            && aggregations().factories() != null
+            && !aggregations().factories().allFactoriesSupportIntraSegmentConcurrentSearch()) {
+            requestShouldUseIntraSegmentConcurrentSearch.set(false);
+        } else if (terminateAfter != DEFAULT_TERMINATE_AFTER) {
+            requestShouldUseIntraSegmentConcurrentSearch.set(false);
+        } else if (concurrentSearchMode.equals(CONCURRENT_SEGMENT_SEARCH_MODE_AUTO)) {
+            requestShouldUseIntraSegmentConcurrentSearch.set(evaluateAutoMode(true));
+        } else {
+            requestShouldUseIntraSegmentConcurrentSearch.set(true);
+        }
     }
 
     public void setProfilers(Profilers profilers) {
@@ -1079,11 +1109,7 @@ final class DefaultSearchContext extends SearchContext {
      * @return the resolved concurrent segment search mode: "none", "auto", or "all"
      */
     private String evaluateConcurrentSearchMode(Executor concurrentSearchExecutor) {
-        // Skip concurrent search for system indices, throttled requests, or if dependencies are missing
-        if (indexShard.isSystem()
-            || indexShard.indexSettings().isSearchThrottled()
-            || clusterService == null
-            || concurrentSearchExecutor == null) {
+        if (skipConcurrentSearch(concurrentSearchExecutor)) {
             return CONCURRENT_SEGMENT_SEARCH_MODE_NONE;
         }
 
@@ -1113,6 +1139,33 @@ final class DefaultSearchContext extends SearchContext {
             IndexSettings.INDEX_CONCURRENT_SEGMENT_SEARCH_MODE.getKey(),
             clusterSettings.get(CLUSTER_CONCURRENT_SEGMENT_SEARCH_MODE)
         );
+    }
+
+    private SearchService.ConcurrentSearchMode evaluateIntraSegmentConcurrentSearchMode(Executor concurrentSearchExecutor) {
+        if (skipConcurrentSearch(concurrentSearchExecutor)) {
+            return SearchService.ConcurrentSearchMode.NONE;
+        }
+
+        Settings indexSettings = indexService.getIndexSettings().getSettings();
+        ClusterSettings clusterSettings = clusterService.getClusterSettings();
+        final String intraSegmentConcurrentMode = indexSettings.get(
+            IndexSettings.INDEX_CONCURRENT_INTRA_SEGMENT_SEARCH_MODE.getKey(),
+            clusterSettings.getOrNull(CONCURRENT_INTRA_SEGMENT_SEARCH_MODE_SETTING)
+        );
+
+        return SearchService.ConcurrentSearchMode.fromValue(intraSegmentConcurrentMode);
+    }
+
+    /**
+     * Applicable for both regular concurrent segment search and intra segment concurrent search.
+     * @return : true if concurrent search should be skipped, otherwise false.
+     */
+    private boolean skipConcurrentSearch(Executor concurrentSearchExecutor) {
+        // Skip concurrent search for system indices, throttled requests, or if dependencies are missing
+        return indexShard.isSystem()
+            || indexShard.indexSettings().isSearchThrottled()
+            || clusterService == null
+            || concurrentSearchExecutor == null;
     }
 
     /**
@@ -1148,6 +1201,20 @@ final class DefaultSearchContext extends SearchContext {
             && sort != null
             && sort.isSortOnTimeSeriesField()
             && sort.sort.getSort()[0].getReverse() == false;
+    }
+
+    @Override
+    public int getIntraSegmentPartitionSize() {
+        if (shouldUseIntraSegmentConcurrentSearch() == false) {
+            return Integer.MAX_VALUE;
+        }
+
+        return indexService.getIndexSettings()
+            .getSettings()
+            .getAsInt(
+                IndexSettings.INDEX_CONCURRENT_INTRA_SEGMENT_PARTITION_SIZE.getKey(),
+                clusterService.getClusterSettings().get(SearchService.CONCURRENT_INTRA_SEGMENT_SEARCH_SEGMENT_PARTITION_SIZE_SETTING)
+            );
     }
 
     @Override

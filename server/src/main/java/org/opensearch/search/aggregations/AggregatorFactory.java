@@ -124,6 +124,14 @@ public abstract class AggregatorFactory {
         return false;
     }
 
+    protected boolean supportsIntraSegmentConcurrentSearch() {
+        return false;
+    }
+
+    public boolean evaluateChildFactoriesForIntraSegmentConcurrentSearch() {
+        return factories.allFactoriesSupportIntraSegmentConcurrentSearch();
+    }
+
     public boolean evaluateChildFactories() {
         return factories.allFactoriesSupportConcurrentSearch();
     }

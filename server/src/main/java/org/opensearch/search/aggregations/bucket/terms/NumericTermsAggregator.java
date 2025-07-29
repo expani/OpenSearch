@@ -72,6 +72,7 @@ import org.opensearch.search.startree.filter.MatchAllFilter;
 
 import java.io.IOException;
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
@@ -248,6 +249,7 @@ public class NumericTermsAggregator extends TermsAggregator implements StarTreeP
         implements
             Releasable {
         private InternalAggregation[] buildAggregations(long[] owningBucketOrds) throws IOException {
+            System.out.println("Building aggregations in thread: " + Thread.currentThread().getName());
             LocalBucketCountThresholds localBucketCountThresholds = context.asLocalBucketCountThresholds(bucketCountThresholds);
             B[][] topBucketsPerOrd = buildTopBucketsPerOrd(owningBucketOrds.length);
             long[] otherDocCounts = new long[owningBucketOrds.length];
@@ -257,6 +259,7 @@ public class NumericTermsAggregator extends TermsAggregator implements StarTreeP
 
                 int size = (int) Math.min(bucketsInOrd, localBucketCountThresholds.getRequiredSize());
                 PriorityQueue<B> ordered = buildPriorityQueue(size);
+                List<String> allSpares = new ArrayList<>();
                 B spare = null;
                 BucketOrdsEnum ordsEnum = bucketOrds.ordsEnum(owningBucketOrds[ordIdx]);
                 Supplier<B> emptyBucketBuilder = emptyBucketBuilder(owningBucketOrds[ordIdx]);
@@ -270,8 +273,11 @@ public class NumericTermsAggregator extends TermsAggregator implements StarTreeP
                         spare = emptyBucketBuilder.get();
                     }
                     updateBucket(spare, ordsEnum, docCount);
+                    allSpares.add(((LongTerms.Bucket) spare).term + ":" + ((LongTerms.Bucket) spare).docCount);
                     spare = ordered.insertWithOverflow(spare);
                 }
+
+                System.out.println("Spares in thread: " + Thread.currentThread().getName() + " is " + allSpares);
 
                 // Get the top buckets
                 B[] bucketsForOrd = buildBuckets(ordered.size());
@@ -297,6 +303,7 @@ public class NumericTermsAggregator extends TermsAggregator implements StarTreeP
             for (int ordIdx = 0; ordIdx < owningBucketOrds.length; ordIdx++) {
                 result[ordIdx] = buildResult(owningBucketOrds[ordIdx], otherDocCounts[ordIdx], topBucketsPerOrd[ordIdx]);
             }
+            System.out.println("Result in thread: " + Thread.currentThread().getName() + " is " + Arrays.toString(result));
             return result;
         }
 

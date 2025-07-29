@@ -302,6 +302,7 @@ public class ContextIndexSearcher extends IndexSearcher implements Releasable {
                 }
             } else {
                 for (LeafReaderContextPartition partition : partitions) {
+                    System.out.println("search partition [" + partition.minDocId + "]");
                     searchLeaf(partition.ctx, partition.minDocId, partition.maxDocId, weight, collector);
                 }
             }
@@ -533,7 +534,7 @@ public class ContextIndexSearcher extends IndexSearcher implements Releasable {
      */
     @Override
     protected LeafSlice[] slices(List<LeafReaderContext> leaves) {
-        return slicesInternal(leaves, searchContext.getTargetMaxSliceCount());
+        return slicesInternal(leaves, searchContext);
     }
 
     public DirectoryReader getDirectoryReader() {
@@ -603,9 +604,9 @@ public class ContextIndexSearcher extends IndexSearcher implements Releasable {
     }
 
     // package-private for testing
-    LeafSlice[] slicesInternal(List<LeafReaderContext> leaves, int targetMaxSlice) {
+    LeafSlice[] slicesInternal(List<LeafReaderContext> leaves, SearchContext searchContext) {
         LeafSlice[] leafSlices;
-        if (targetMaxSlice == 0) {
+        if (searchContext.getTargetMaxSliceCount() == 0) {
             // use the default lucene slice calculation
             leafSlices = super.slices(leaves);
             logger.debug("Slice count using lucene default [{}]", leafSlices.length);
