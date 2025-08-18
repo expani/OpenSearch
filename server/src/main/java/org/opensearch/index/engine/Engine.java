@@ -758,6 +758,7 @@ public abstract class Engine implements LifecycleAware, Closeable {
         Releasable releasable = store::decRef;
         try {
             ReferenceManager<OpenSearchDirectoryReader> referenceManager = getReferenceManager(scope);
+            // FIXME : This is again Lucene Specific. So, we need something that wraps OSDirReader.
             OpenSearchDirectoryReader acquire = referenceManager.acquire();
             SearcherSupplier reader = new SearcherSupplier(wrapper) {
                 @Override
@@ -1404,6 +1405,7 @@ public abstract class Engine implements LifecycleAware, Closeable {
      * @opensearch.api
      */
     @PublicApi(since = "1.0.0")
+    // This is still
     public abstract static class SearcherSupplier implements Releasable {
         private final Function<Searcher, Searcher> wrapper;
         private final AtomicBoolean released = new AtomicBoolean(false);
@@ -1431,6 +1433,7 @@ public abstract class Engine implements LifecycleAware, Closeable {
 
         protected abstract void doClose();
 
+        // FIXME : Returning Searcher here becomes tied down to Lucene so we need something which wraps a Searcher
         protected abstract Searcher acquireSearcherInternal(String source);
     }
 
@@ -1440,6 +1443,7 @@ public abstract class Engine implements LifecycleAware, Closeable {
      * @opensearch.api
      */
     @PublicApi(since = "1.0.0")
+    // TODO : We need to create something similar for DataFusion
     public static final class Searcher extends IndexSearcher implements Releasable {
         private final String source;
         private final Closeable onClose;

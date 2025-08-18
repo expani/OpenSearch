@@ -313,11 +313,14 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
             listener = TimeoutTaskCancellationUtility.wrapWithCancellationListener(
                 client,
                 (CancellableTask) task,
+                // TODO : How will cancellation work with DataFusion here ?
                 clusterService.getClusterSettings().get(SEARCH_CANCEL_AFTER_TIME_INTERVAL_SETTING),
                 listener,
                 e -> {}
             );
         }
+        logger.info("Executing task {}", task);
+        Thread.dumpStack();
         executeRequest(task, searchRequest, this::searchAsyncAction, listener);
     }
 
@@ -527,6 +530,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
                     searchRequestContext
                 );
             } else {
+                // TODO : Cross Cluster Search needs to be supported with DF ?
                 if (shouldMinimizeRoundtrips(searchRequest)) {
                     ccsRemoteReduce(
                         searchRequest,
@@ -1067,6 +1071,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
         final GroupShardsIterator<SearchShardIterator> shardIterators = mergeShardsIterators(localShardIterators, remoteShardIterators);
         failIfOverShardCountLimit(clusterService, shardIterators.size());
         Map<String, Float> concreteIndexBoosts = resolveIndexBoosts(searchRequest, clusterState);
+        // TODO : This is rewriting to do some optimisation at the search request level instead of query level. Can be moved elsewhere
         // optimize search type for cases where there is only one shard group to search on
         if (shardIterators.size() == 1) {
             // if we only have one group, then we always want Q_T_F, no need for DFS, and no need to do THEN since we hit one shard
@@ -1100,6 +1105,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
             concreteLocalIndices,
             localShardIterators.size() + remoteShardIterators.size()
         );
+        // Everything above was prep for executing the search, now we start
         searchAsyncActionProvider.asyncSearchAction(
             task,
             searchRequest,
@@ -1184,6 +1190,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
     }
 
     interface SearchAsyncActionProvider {
+        // The Anonymous implementation is only called while creating PIT the other is for all other search requests.
         AbstractSearchAsyncAction<? extends SearchPhaseResult> asyncSearchAction(
             SearchTask task,
             SearchRequest searchRequest,
@@ -1221,6 +1228,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
         SearchRequestContext searchRequestContext
     ) {
         if (preFilter) {
+            // TODO : Will queries from SQL/PPL plugin ever go into this ?
             return new CanMatchPreFilterSearchPhase(
                 logger,
                 searchTransportService,

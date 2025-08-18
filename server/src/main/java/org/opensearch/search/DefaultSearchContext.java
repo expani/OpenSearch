@@ -139,6 +139,7 @@ final class DefaultSearchContext extends SearchContext {
     private static final Logger logger = LogManager.getLogger(DefaultSearchContext.class);
 
     private final ReaderContext readerContext;
+    // FIXME : This needs to be pushed down to Lucene Specific Search Context
     private final Engine.Searcher engineSearcher;
     private final ShardSearchRequest request;
     private final SearchShardTarget shardTarget;
@@ -149,6 +150,7 @@ final class DefaultSearchContext extends SearchContext {
     private final IndexShard indexShard;
     private final ClusterService clusterService;
     private final IndexService indexService;
+    // FIXME : This needs to be pushed down to Lucene Specific Search Context
     private final ContextIndexSearcher searcher;
     private final DfsSearchResult dfsResult;
     private final QuerySearchResult queryResult;
@@ -175,6 +177,8 @@ final class DefaultSearchContext extends SearchContext {
 
     private boolean includeNamedQueriesScore = false;
     private int trackTotalHitsUpTo = SearchContext.DEFAULT_TRACK_TOTAL_HITS_UP_TO;
+    // TODO : This just represents the doc Id and score after which the search should start matching hits.
+    // TODO : Although the class comes Lucene, we can still reuse it ?
     private FieldDoc searchAfter;
     private CollapseContext collapse;
     // filter for sliced scroll
@@ -192,6 +196,7 @@ final class DefaultSearchContext extends SearchContext {
     /**
      * The query to actually execute.
      */
+    // TODO : All user queries will convert to this, so keep it AS IS ?
     private Query query;
     private ParsedQuery postFilter;
     private Query aliasFilter;
@@ -202,10 +207,12 @@ final class DefaultSearchContext extends SearchContext {
     private SearchHighlightContext highlight;
     private SuggestionSearchContext suggest;
     private List<RescoreContext> rescore;
+    // FIXME : This is again Lucene Specific need to see how to integrate DF profiling.
     private Profilers profilers;
     private BucketCollectorProcessor bucketCollectorProcessor = NO_OP_BUCKET_COLLECTOR_PROCESSOR;
     private final Map<String, SearchExtBuilder> searchExtBuilders = new HashMap<>();
     private final Map<Class<?>, CollectorManager<? extends Collector, ReduceableSearchResult>> queryCollectorManagers = new HashMap<>();
+    // FIXME : This class has it's own Lucene specific demons that need handling
     private final QueryShardContext queryShardContext;
     private final FetchPhase fetchPhase;
     private final Function<SearchSourceBuilder, InternalAggregation.ReduceContextBuilder> requestToAggReduceContextBuilder;

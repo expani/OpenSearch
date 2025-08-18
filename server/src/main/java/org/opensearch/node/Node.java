@@ -1689,6 +1689,7 @@ public class Node implements Closeable {
         }
 
         logger.info("starting ...");
+        logger.info("\nWoohoo my logger showed up...let's go\n");
         pluginLifecycleComponents.forEach(LifecycleComponent::start);
 
         injector.getInstance(MappingUpdatedAction.class).setClient(client);

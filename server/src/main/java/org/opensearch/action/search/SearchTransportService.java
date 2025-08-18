@@ -244,6 +244,8 @@ public class SearchTransportService {
         Writeable.Reader<SearchPhaseResult> reader = fetchDocuments ? QueryFetchSearchResult::new : QuerySearchResult::new;
 
         final ActionListener handler = responseWrapper.apply(connection, listener);
+        // This will send the transport request to the underlying shard for search
+        // The request handler will call SearchService#executeQueryPhase. Registration is done in SearchTransportService
         transportService.sendChildRequest(
             connection,
             QUERY_ACTION_NAME,

@@ -207,6 +207,7 @@ abstract class AbstractSearchAsyncAction<Result extends SearchPhaseResult> exten
      * This is the main entry point for a search. This method starts the search execution of the initial phase.
      */
     public final void start() {
+        // This gets called from TransportSearchAction and is flow transfers here.
         if (getNumShards() == 0) {
             // no search shards to search on, bail with empty response
             // (it happens with search across _all with no indices around and consistent with broadcast operations)
@@ -296,6 +297,7 @@ abstract class AbstractSearchAsyncAction<Result extends SearchPhaseResult> exten
                 final Thread thread = Thread.currentThread();
                 try {
                     final SearchPhase phase = this;
+                    // This actually calls the underlying phase DFS or non DFS or Pre filter
                     executePhaseOnShard(shardIt, shard, new SearchActionListener<Result>(shard, shardIndex) {
                         @Override
                         public void innerOnResponse(Result result) {
@@ -460,6 +462,7 @@ abstract class AbstractSearchAsyncAction<Result extends SearchPhaseResult> exten
     }
 
     private void onPhaseStart(SearchPhase phase) {
+        logger.info("Starting phase {}", phase.getName());
         setCurrentPhase(phase);
         if (currentPhaseHasLifecycle) {
             this.searchRequestContext.getSearchRequestOperationsListener().onPhaseStart(this);
@@ -478,6 +481,7 @@ abstract class AbstractSearchAsyncAction<Result extends SearchPhaseResult> exten
         Span phaseSpan = tracer.startSpan(SpanCreationContext.server().name("[phase/" + phase.getName() + "]"));
         try (final SpanScope scope = tracer.withSpanInScope(phaseSpan)) {
             onPhaseStart(phase);
+            // This records the start time and calls the underlying phase to run
             phase.recordAndRun();
         } catch (Exception e) {
             if (logger.isDebugEnabled()) {

@@ -666,10 +666,12 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
         SearchShardTask task,
         ActionListener<SearchPhaseResult> listener
     ) {
+        // TODO : Verify this happens at the data node once coordinator send request from SearchTransportService.
         assert request.canReturnNullResponseIfMatchNoDocs() == false || request.numberOfShards() > 1
             : "empty responses require more than one shard";
         final IndexShard shard = getShard(request);
         rewriteAndFetchShardRequest(shard, request, new ActionListener<ShardSearchRequest>() {
+            // Called from Rewritable#rewriteAndFetch
             @Override
             public void onResponse(ShardSearchRequest orig) {
                 // check if we can shortcut the query phase entirely.
@@ -713,6 +715,7 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
 
     private SearchPhaseResult executeQueryPhase(ShardSearchRequest request, SearchShardTask task, boolean keepStatesInContext)
         throws Exception {
+        // TODO : Verify this is what happens in every data node that has a target shard
         final ReaderContext readerContext = createOrGetReaderContext(request, keepStatesInContext);
         try (
             Releasable ignored = readerContext.markAsUsed(getKeepAlive(request));
@@ -939,6 +942,7 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
     }
 
     final ReaderContext createOrGetReaderContext(ShardSearchRequest request, boolean keepStatesInContext) {
+        // TODO : Is this if block only executed for PIT queries ?
         if (request.readerId() != null) {
             assert keepStatesInContext == false;
             return findReaderContext(request.readerId(), request);

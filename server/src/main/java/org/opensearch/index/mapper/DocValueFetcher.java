@@ -66,6 +66,7 @@ public final class DocValueFetcher implements ValueFetcher {
 
     @Override
     public List<Object> fetchValues(SourceLookup lookup) throws IOException {
+        // This is where fetch phase reads from DocValues
         if (false == leaf.advanceExact(lookup.docId())) {
             return emptyList();
         }

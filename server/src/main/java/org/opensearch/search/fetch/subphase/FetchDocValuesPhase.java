@@ -108,6 +108,7 @@ public final class FetchDocValuesPhase implements FetchSubPhase {
                         // docValues fields will still be document fields, and put under "fields" section of a hit.
                         hit.hit().setDocumentField(f.field, hitField);
                     }
+                    // This is where Fetch Phase reads from Doc Values
                     hitField.getValues().addAll(f.fetcher.fetchValues(hit.sourceLookup()));
                 }
             }
