@@ -1175,6 +1175,7 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
                 request.getClusterAlias(),
                 OriginalIndices.NONE
             );
+            // TODO : If we have different search context for DF, it needs to be handled here ?
             searchContext = new DefaultSearchContext(
                 reader,
                 request,

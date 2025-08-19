@@ -73,8 +73,11 @@ public class BucketCollectorProcessor {
             } else if (currentCollector instanceof BucketCollector) {
                 // Perform build aggregation during post collection
                 if (currentCollector instanceof Aggregator) {
+                    // This is the whole reason for the existence of this method. Everything else is just unwrapping stuff.
                     // Do not perform postCollection for MultiBucketCollector as we are unwrapping that below
                     ((BucketCollector) currentCollector).postCollection();
+                    // This builds the InternalAggregation for each Aggregator where each aggregator it's BucketOrds is set during collection or pre-compute.
+                    // Maybe we create another implementation for LongKeyedBucketOrds which returns from DF collected results.
                     ((Aggregator) currentCollector).buildTopLevel();
                 } else if (currentCollector instanceof MultiBucketCollector) {
                     for (Collector innerCollector : ((MultiBucketCollector) currentCollector).getCollectors()) {

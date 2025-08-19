@@ -296,6 +296,7 @@ public class ContextIndexSearcher extends IndexSearcher implements Releasable {
             // This is actually beneficial for search queries to start search on latest segments first for time series workload.
             // That can slow down ASC order queries on timestamp workload. So to avoid that slowdown, we will reverse leaf
             // reader order here.
+            // TODO : How will this work out in Datafusion ? Modify Physical plan ?
             if (searchContext.shouldUseTimeSeriesDescSortOptimization()) {
                 for (int i = partitions.length - 1; i >= 0; i--) {
                     searchLeaf(partitions[i].ctx, partitions[i].minDocId, partitions[i].maxDocId, weight, collector);
@@ -306,6 +307,7 @@ public class ContextIndexSearcher extends IndexSearcher implements Releasable {
                 }
             }
             // TODO : Make this a responsibility for the callers rather than implicitly getting it done here ?
+            // FIXME : This internally triggers buildAggregation. For DF, we would need to create it after converting results returned from DF.
             searchContext.bucketCollectorProcessor().processPostCollection(collector);
         } catch (Throwable t) {
             searchContext.indexShard().getSearchOperationListener().onFailedSliceExecution(searchContext);
@@ -330,6 +332,7 @@ public class ContextIndexSearcher extends IndexSearcher implements Releasable {
 
         final LeafCollector leafCollector;
         try {
+            // Query Cancellation getting checked per leaf/segment.
             cancellable.checkCancelled();
             if (weight instanceof ProfileWeight) {
                 ((ProfileWeight) weight).associateCollectorToLeaves(ctx, collector);
@@ -490,6 +493,7 @@ public class ContextIndexSearcher extends IndexSearcher implements Releasable {
         checkCancelled.run();
         iterator.advance(minDocId);
         for (int docId = iterator.docID(); docId < maxDocId; docId = iterator.nextDoc()) {
+            // Query Cancellation getting checked for intersection of every 2^11 docs b/w Live a.k.a Non Deleted Docs and the docs returned by Query's Scorer.
             if (++seen % CHECK_CANCELLED_SCORER_INTERVAL == 0) {
                 checkCancelled.run();
             }
