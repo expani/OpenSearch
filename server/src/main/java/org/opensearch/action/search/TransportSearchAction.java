@@ -319,6 +319,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
                 e -> {}
             );
         }
+        // This is where the call lands from SQL/PPL plugin
         logger.info("Executing task {}", task);
         Thread.dumpStack();
         executeRequest(task, searchRequest, this::searchAsyncAction, listener);
@@ -484,6 +485,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
                     );
                 }
             }, listener::onFailure);
+            // Search gets triggered after the request is transformed by calling the RewriteListener wrapped above.
             searchRequest.transformRequest(requestTransformListener);
         }
     }
@@ -497,6 +499,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
         SearchRequestContext searchRequestContext
     ) {
         return ActionListener.wrap(source -> {
+            // Gets called after Search Pipeline has transformed the request.
             if (source != searchRequest.source()) {
                 // only set it if it changed - we don't allow null values to be set but it might be already null. this way we catch
                 // situations when source is rewritten to null due to a bug
@@ -530,7 +533,8 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
                     searchRequestContext
                 );
             } else {
-                // TODO : Cross Cluster Search needs to be supported with DF ?
+                // TODO : Support Cross Cluster with DF. Just include the extra information required by DF ?
+                //  Other cluster should also have plugins supporting DF; etc.
                 if (shouldMinimizeRoundtrips(searchRequest)) {
                     ccsRemoteReduce(
                         searchRequest,
@@ -1071,7 +1075,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
         final GroupShardsIterator<SearchShardIterator> shardIterators = mergeShardsIterators(localShardIterators, remoteShardIterators);
         failIfOverShardCountLimit(clusterService, shardIterators.size());
         Map<String, Float> concreteIndexBoosts = resolveIndexBoosts(searchRequest, clusterState);
-        // TODO : This is rewriting to do some optimisation at the search request level instead of query level. Can be moved elsewhere
+        // TODO : This is rewriting to do some optimisation and setting defaults at the search request level instead of query level.
         // optimize search type for cases where there is only one shard group to search on
         if (shardIterators.size() == 1) {
             // if we only have one group, then we always want Q_T_F, no need for DFS, and no need to do THEN since we hit one shard
@@ -1091,6 +1095,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
                     break;
             }
         }
+        // TODO : Continuation of above TODO  Can be moved elsewhere
         final DiscoveryNodes nodes = clusterState.nodes();
         BiFunction<String, String, Transport.Connection> connectionLookup = buildConnectionLookup(
             searchRequest.getLocalClusterAlias(),
@@ -1105,7 +1110,8 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
             concreteLocalIndices,
             localShardIterators.size() + remoteShardIterators.size()
         );
-        // Everything above was prep for executing the search, now we start
+        // Everything above was prep for executing the search like figuring out target shards
+        // and building the Connection to nodes containing them, now we start the search.
         searchAsyncActionProvider.asyncSearchAction(
             task,
             searchRequest,
@@ -1190,7 +1196,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
     }
 
     interface SearchAsyncActionProvider {
-        // The Anonymous implementation is only called while creating PIT the other is for all other search requests.
+        // The Anonymous implementation is only called while creating PIT the other is for all other search types.
         AbstractSearchAsyncAction<? extends SearchPhaseResult> asyncSearchAction(
             SearchTask task,
             SearchRequest searchRequest,

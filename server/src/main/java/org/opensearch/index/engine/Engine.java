@@ -1405,7 +1405,6 @@ public abstract class Engine implements LifecycleAware, Closeable {
      * @opensearch.api
      */
     @PublicApi(since = "1.0.0")
-    // This is still
     public abstract static class SearcherSupplier implements Releasable {
         private final Function<Searcher, Searcher> wrapper;
         private final AtomicBoolean released = new AtomicBoolean(false);
@@ -1443,7 +1442,7 @@ public abstract class Engine implements LifecycleAware, Closeable {
      * @opensearch.api
      */
     @PublicApi(since = "1.0.0")
-    // TODO : We need to create something similar for DataFusion
+    // TODO : We need to create something similar for only DF and composite for DF + Lucene as well.
     public static final class Searcher extends IndexSearcher implements Releasable {
         private final String source;
         private final Closeable onClose;

@@ -207,7 +207,7 @@ abstract class AbstractSearchAsyncAction<Result extends SearchPhaseResult> exten
      * This is the main entry point for a search. This method starts the search execution of the initial phase.
      */
     public final void start() {
-        // This gets called from TransportSearchAction and is flow transfers here.
+        // The call from TransportSearchAction lands here to execute search request.
         if (getNumShards() == 0) {
             // no search shards to search on, bail with empty response
             // (it happens with search across _all with no indices around and consistent with broadcast operations)
@@ -238,6 +238,8 @@ abstract class AbstractSearchAsyncAction<Result extends SearchPhaseResult> exten
 
     @Override
     public final void run() {
+        // An iterator can be skipped by the CanMatchPreFilterSearchPhase.
+        // See the call to resetAndSkip() in the class CanMatchPreFilterSearchPhase.
         for (final SearchShardIterator iterator : toSkipShardsIts) {
             assert iterator.skip();
             skipShard(iterator);
@@ -264,6 +266,7 @@ abstract class AbstractSearchAsyncAction<Result extends SearchPhaseResult> exten
                     throw new SearchPhaseExecutionException(getName(), msg, null, ShardSearchFailure.EMPTY_ARRAY);
                 }
             }
+            // This is what goes through each eligible request for a shard and performs the phases on it.
             for (int index = 0; index < shardsIts.size(); index++) {
                 final SearchShardIterator shardRoutings = shardsIts.get(index);
                 assert shardRoutings.skip() == false;
@@ -288,6 +291,7 @@ abstract class AbstractSearchAsyncAction<Result extends SearchPhaseResult> exten
          * we can continue (cf. InitialSearchPhase#maybeFork).
          */
         if (shard == null) {
+            // Means all shards were exhausted as this method is also called on failure. See onShardFailure.
             fork(() -> onShardFailure(shardIndex, null, shardIt, new NoShardAvailableActionException(shardIt.shardId())));
         } else {
             final PendingExecutions pendingExecutions = throttleConcurrentRequests
@@ -297,7 +301,7 @@ abstract class AbstractSearchAsyncAction<Result extends SearchPhaseResult> exten
                 final Thread thread = Thread.currentThread();
                 try {
                     final SearchPhase phase = this;
-                    // This actually calls the underlying phase DFS or non DFS or Pre filter
+                    // This actually calls the underlying phase DFSQryFetch or QryFetch or CanMatchPreFilter.
                     executePhaseOnShard(shardIt, shard, new SearchActionListener<Result>(shard, shardIndex) {
                         @Override
                         public void innerOnResponse(Result result) {
@@ -481,7 +485,7 @@ abstract class AbstractSearchAsyncAction<Result extends SearchPhaseResult> exten
         Span phaseSpan = tracer.startSpan(SpanCreationContext.server().name("[phase/" + phase.getName() + "]"));
         try (final SpanScope scope = tracer.withSpanInScope(phaseSpan)) {
             onPhaseStart(phase);
-            // This records the start time and calls the underlying phase to run
+            // This just records the start time and calls it's own run method.
             phase.recordAndRun();
         } catch (Exception e) {
             if (logger.isDebugEnabled()) {

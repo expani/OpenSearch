@@ -124,6 +124,7 @@ public class QueryPhaseResultConsumer extends ArraySearchPhaseResults<SearchPhas
         Releasables.close(pendingMerges);
     }
 
+    // TODO : Check if this is what consumes the result from one data node.
     @Override
     public void consumeResult(SearchPhaseResult result, Runnable next) {
         super.consumeResult(result, () -> {});
@@ -132,6 +133,7 @@ public class QueryPhaseResultConsumer extends ArraySearchPhaseResults<SearchPhas
         pendingMerges.consume(querySearchResult, next);
     }
 
+    // TODO : Check if this is what merges/aggregates the results from fan out to all target shards.
     @Override
     public SearchPhaseController.ReducedQueryPhase reduce() throws Exception {
         if (pendingMerges.hasPendingMerges()) {

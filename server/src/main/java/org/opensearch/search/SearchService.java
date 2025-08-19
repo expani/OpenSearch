@@ -666,7 +666,7 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
         SearchShardTask task,
         ActionListener<SearchPhaseResult> listener
     ) {
-        // TODO : Verify this happens at the data node once coordinator send request from SearchTransportService.
+        // TODO : Verify this happens at the data node after Coordinator sends request from SearchTransportService.
         assert request.canReturnNullResponseIfMatchNoDocs() == false || request.numberOfShards() > 1
             : "empty responses require more than one shard";
         final IndexShard shard = getShard(request);
@@ -1667,6 +1667,7 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
         return canMatch(request, true);
     }
 
+    // TODO : The same needs to implemented for DF. It's trying to check if the search request can match the shard.
     private CanMatchResponse canMatch(ShardSearchRequest request, boolean checkRefreshPending) throws IOException {
         assert request.searchType() == SearchType.QUERY_THEN_FETCH : "unexpected search type: " + request.searchType();
         final ReaderContext readerContext = request.readerId() != null ? findReaderContext(request.readerId(), request) : null;
