@@ -666,10 +666,12 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
         SearchShardTask task,
         ActionListener<SearchPhaseResult> listener
     ) {
-        // TODO : Verify this happens at the data node after Coordinator sends request from SearchTransportService.
+        // This is the first entrypoint at the data node after Coordinator sends request from SearchTransportService.
         assert request.canReturnNullResponseIfMatchNoDocs() == false || request.numberOfShards() > 1
             : "empty responses require more than one shard";
         final IndexShard shard = getShard(request);
+        // Rewrite means logical plan optimisation in case of DF so we should avoid the same here.
+        // TODO : How would this work for combining results between Lucene + DF then ?
         rewriteAndFetchShardRequest(shard, request, new ActionListener<ShardSearchRequest>() {
             // Called from Rewritable#rewriteAndFetch
             @Override
@@ -715,7 +717,7 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
 
     private SearchPhaseResult executeQueryPhase(ShardSearchRequest request, SearchShardTask task, boolean keepStatesInContext)
         throws Exception {
-        // TODO : Verify this is what happens in every data node that has a target shard
+        // This is what happens in every data node that has a target shard.
         final ReaderContext readerContext = createOrGetReaderContext(request, keepStatesInContext);
         try (
             Releasable ignored = readerContext.markAsUsed(getKeepAlive(request));

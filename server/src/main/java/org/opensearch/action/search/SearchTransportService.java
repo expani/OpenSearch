@@ -85,6 +85,7 @@ import java.util.function.BiFunction;
  */
 public class SearchTransportService {
 
+    // TODO : Will all of these require an equivalent in DataFusion ?
     public static final String FREE_CONTEXT_SCROLL_ACTION_NAME = "indices:data/read/search[free_context/scroll]";
     public static final String FREE_CONTEXT_ACTION_NAME = "indices:data/read/search[free_context]";
     public static final String CLEAR_SCROLL_CONTEXTS_ACTION_NAME = "indices:data/read/search[clear_scroll_contexts]";

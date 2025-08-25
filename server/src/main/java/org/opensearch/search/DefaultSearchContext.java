@@ -197,6 +197,7 @@ final class DefaultSearchContext extends SearchContext {
      * The query to actually execute.
      */
     // TODO : All user queries will convert to this, so keep it AS IS ?
+    // Rewrites should work as is because indexWriterConfig contains the Lucene Field.
     private Query query;
     private ParsedQuery postFilter;
     private Query aliasFilter;

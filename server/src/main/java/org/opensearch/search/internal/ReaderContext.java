@@ -65,6 +65,7 @@ public class ReaderContext implements Releasable {
     private final ShardSearchContextId id;
     private final IndexService indexService;
     private final IndexShard indexShard;
+    // FIXME: The only thing tied down to Lucene here.
     protected final Engine.SearcherSupplier searcherSupplier;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final boolean singleSession;
@@ -150,6 +151,7 @@ public class ReaderContext implements Releasable {
         return indexShard;
     }
 
+    // This is what SearchContext and SearchService use further down the line.
     public Engine.Searcher acquireSearcher(String source) {
         return searcherSupplier.acquireSearcher(source);
     }
@@ -192,6 +194,7 @@ public class ReaderContext implements Releasable {
         return null;
     }
 
+    // FIXME : This is Lucene specific as well since it points to Term and Collection Statistics.
     public AggregatedDfs getAggregatedDfs(AggregatedDfs other) {
         return other;
     }

@@ -850,6 +850,7 @@ abstract class AbstractSearchAsyncAction<Result extends SearchPhaseResult> exten
         float indexBoost = concreteIndexBoosts.getOrDefault(shardIt.shardId().getIndex().getUUID(), DEFAULT_INDEX_BOOST);
         String indexName = shardIt.shardId().getIndex().getName();
         final String[] routings = indexRoutings.getOrDefault(indexName, Collections.emptySet()).toArray(new String[0]);
+        // Shard search request creation
         ShardSearchRequest shardRequest = new ShardSearchRequest(
             shardIt.getOriginalIndices(),
             request,

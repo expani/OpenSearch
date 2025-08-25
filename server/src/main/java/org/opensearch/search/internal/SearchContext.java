@@ -271,6 +271,7 @@ public abstract class SearchContext implements Releasable {
      */
     public abstract SearchContext fetchFieldsContext(FetchFieldsContext fetchFieldsContext);
 
+    // FIXME : This means for DF there has to be a different context ? This single method has 88 usage in code base
     public abstract ContextIndexSearcher searcher();
 
     public abstract IndexShard indexShard();

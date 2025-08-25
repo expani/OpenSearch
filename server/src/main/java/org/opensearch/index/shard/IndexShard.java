@@ -1429,6 +1429,7 @@ public class IndexShard extends AbstractIndexShardComponent implements IndicesCl
         return result;
     }
 
+    // TransportExplain, ShardGet ( Fetch document using it's ID ) and TermVector
     public Engine.GetResult get(Engine.Get get) {
         readAllowed();
         DocumentMapper mapper = mapperService.documentMapper();
@@ -1990,6 +1991,7 @@ public class IndexShard extends AbstractIndexShardComponent implements IndicesCl
         return engine.acquireSearcherSupplier(this::wrapSearcher, scope);
     }
 
+    // Used by CanMatch, TermVectorService and DataStreamStatsAction.
     public Engine.Searcher acquireSearcher(String source) {
         return acquireSearcher(source, Engine.SearcherScope.EXTERNAL);
     }

@@ -757,10 +757,12 @@ public abstract class Engine implements LifecycleAware, Closeable {
         }
         Releasable releasable = store::decRef;
         try {
+            // ReferenceManager being Lucene specific is still okay-ish.
             ReferenceManager<OpenSearchDirectoryReader> referenceManager = getReferenceManager(scope);
-            // FIXME : This is again Lucene Specific. So, we need something that wraps OSDirReader.
+            // FIXME : This is Lucene Specific. So, we need something that wraps OSDirReader.
             OpenSearchDirectoryReader acquire = referenceManager.acquire();
             SearcherSupplier reader = new SearcherSupplier(wrapper) {
+                // FIXME : This is again Lucene Specific. So, we need something that wraps Searcher.
                 @Override
                 public Searcher acquireSearcherInternal(String source) {
                     assert assertSearcherIsWarmedUp(source, scope);
@@ -802,10 +804,12 @@ public abstract class Engine implements LifecycleAware, Closeable {
         }
     }
 
+    // Used to acquire a searcher for completion stats cache by all Engine Impls.
     public final Searcher acquireSearcher(String source) throws EngineException {
         return acquireSearcher(source, SearcherScope.EXTERNAL);
     }
 
+    // Used in IngestionEngine, InternalEngine and Engine for ton's of indexing related stuff
     public Searcher acquireSearcher(String source, SearcherScope scope) throws EngineException {
         return acquireSearcher(source, scope, Function.identity());
     }
@@ -829,6 +833,7 @@ public abstract class Engine implements LifecycleAware, Closeable {
         }
     }
 
+    // This needs to start returning a reference manager based on the underlying query engine used.
     protected abstract ReferenceManager<OpenSearchDirectoryReader> getReferenceManager(SearcherScope scope);
 
     boolean assertSearcherIsWarmedUp(String source, SearcherScope scope) {
@@ -1432,7 +1437,7 @@ public abstract class Engine implements LifecycleAware, Closeable {
 
         protected abstract void doClose();
 
-        // FIXME : Returning Searcher here becomes tied down to Lucene so we need something which wraps a Searcher
+        // FIXME : Returning Searcher here becomes tied down to Lucene so we need something which wraps a Searcher ?
         protected abstract Searcher acquireSearcherInternal(String source);
     }
 
