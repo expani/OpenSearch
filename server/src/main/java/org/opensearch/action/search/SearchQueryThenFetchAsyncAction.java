@@ -130,6 +130,7 @@ class SearchQueryThenFetchAsyncAction extends AbstractSearchAsyncAction<SearchPh
         final SearchShardTarget shard,
         final SearchActionListener<SearchPhaseResult> listener
     ) {
+        // Embed the DF specific things into the request here.
         ShardSearchRequest request = rewriteShardSearchRequest(super.buildShardSearchRequest(shardIt));
         // update inbound network time with current time before sending request over n/w to data node
         if (request != null) {

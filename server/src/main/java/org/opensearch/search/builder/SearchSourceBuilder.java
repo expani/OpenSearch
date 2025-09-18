@@ -1179,6 +1179,7 @@ public final class SearchSourceBuilder implements Writeable, ToXContentObject, R
      */
     @Override
     public SearchSourceBuilder rewrite(QueryRewriteContext context) throws IOException {
+        // This happens before a query is executed via IndexSearcher. Everything gets rewritten.
         assert (this.equals(
             shallowCopy(queryBuilder, postQueryBuilder, aggregations, sliceBuilder, sorts, rescoreBuilders, highlightBuilder)
         ));

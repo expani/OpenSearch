@@ -110,6 +110,7 @@ final class ExpandSearchPhase extends SearchPhase {
                     multiRequest.add(groupRequest);
                 }
             }
+            // This executes a MSearch request again. So, we should be good with DF as well.
             context.getSearchTransport().sendExecuteMultiSearch(multiRequest, context.getTask(), ActionListener.wrap(response -> {
                 Iterator<MultiSearchResponse.Item> it = response.iterator();
                 for (SearchHit hit : searchResponse.hits.getHits()) {

@@ -671,7 +671,7 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
             : "empty responses require more than one shard";
         final IndexShard shard = getShard(request);
         // Rewrite means logical plan optimisation in case of DF so we should avoid the same here.
-        // TODO : How would this work for combining results between Lucene + DF then ?
+        // For Lucene + DF, this needs to only rewrite the partial query that will be executed in Lucene.
         rewriteAndFetchShardRequest(shard, request, new ActionListener<ShardSearchRequest>() {
             // Called from Rewritable#rewriteAndFetch
             @Override

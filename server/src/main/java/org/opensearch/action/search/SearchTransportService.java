@@ -85,7 +85,8 @@ import java.util.function.BiFunction;
  */
 public class SearchTransportService {
 
-    // TODO : Will all of these require an equivalent in DataFusion ?
+    // These are tied to the permission required in security plugin.
+    // If so, we can't change here to have an Data fusion equivalent.
     public static final String FREE_CONTEXT_SCROLL_ACTION_NAME = "indices:data/read/search[free_context/scroll]";
     public static final String FREE_CONTEXT_ACTION_NAME = "indices:data/read/search[free_context]";
     public static final String CLEAR_SCROLL_CONTEXTS_ACTION_NAME = "indices:data/read/search[clear_scroll_contexts]";
@@ -245,7 +246,7 @@ public class SearchTransportService {
         Writeable.Reader<SearchPhaseResult> reader = fetchDocuments ? QueryFetchSearchResult::new : QuerySearchResult::new;
 
         final ActionListener handler = responseWrapper.apply(connection, listener);
-        // This will send the transport request to the underlying shard for search
+        // This will send the transport request to the underlying shard for search.
         // The request handler will call SearchService#executeQueryPhase. Registration is done in SearchTransportService
         transportService.sendChildRequest(
             connection,

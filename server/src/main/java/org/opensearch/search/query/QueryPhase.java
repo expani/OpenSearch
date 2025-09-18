@@ -370,6 +370,7 @@ public class QueryPhase {
             queryResult.terminatedEarly(false);
         }
         for (QueryCollectorContext ctx : collectors) {
+            // This is where the result from collectors is given into the response.
             ctx.postProcess(queryResult);
         }
         if (queryCollectorContext instanceof RescoringQueryCollectorContext) {

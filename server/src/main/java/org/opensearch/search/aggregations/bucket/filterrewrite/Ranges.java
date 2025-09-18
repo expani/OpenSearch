@@ -10,6 +10,7 @@ package org.opensearch.search.aggregations.bucket.filterrewrite;
 
 import org.apache.lucene.util.ArrayUtil;
 
+
 /**
  * Internal ranges representation for the filter rewrite optimization
  */

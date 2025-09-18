@@ -20,7 +20,7 @@ import java.util.Collections;
 import java.util.Objects;
 
 /**
- * {@link CollectorManager} to take care of non-global aggregation operators in case of concurrent segment search
+ * {@link CollectorManager} to take care of non-global aggregators in case of concurrent segment search
  */
 public class NonGlobalAggCollectorManager extends AggregationCollectorManager {
 

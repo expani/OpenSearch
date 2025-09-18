@@ -574,6 +574,7 @@ public class InternalEngine extends Engine {
         try {
             try {
                 final OpenSearchDirectoryReader directoryReader = OpenSearchDirectoryReader.wrap(
+                    // Opening a NRT Reader here
                     DirectoryReader.open(indexWriter),
                     shardId
                 );

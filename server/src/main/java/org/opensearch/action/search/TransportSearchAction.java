@@ -319,9 +319,8 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
                 e -> {}
             );
         }
+        logger.info("Received search request for {}", searchRequest.source().query());
         // This is where the call lands from SQL/PPL plugin
-        logger.info("Executing task {}", task);
-        Thread.dumpStack();
         executeRequest(task, searchRequest, this::searchAsyncAction, listener);
     }
 
@@ -533,8 +532,8 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
                     searchRequestContext
                 );
             } else {
-                // TODO : Support Cross Cluster with DF. Just include the extra information required by DF ?
-                //  Other cluster should also have plugins supporting DF; etc.
+                // Need to see what breaks with CCS since only the changes that are done should be at Shard Search level.
+                // Even if remote cluster doesn't have data-fusion it continues to work with existing Lucene backed indices.
                 if (shouldMinimizeRoundtrips(searchRequest)) {
                     ccsRemoteReduce(
                         searchRequest,
@@ -1030,6 +1029,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
         final Map<String, Set<String>> indexRoutings;
 
         final String[] concreteLocalIndices;
+        // Only in case of PIT queries.
         if (searchContext != null) {
             assert searchRequest.pointInTimeBuilder() != null;
             aliasFilter = searchContext.aliasFilter();
@@ -1104,6 +1104,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
             searchTransportService::getConnection
         );
         final Executor asyncSearchExecutor = asyncSearchExecutor(concreteLocalIndices, clusterState);
+        // We need to disable it for DF until we get an interface to rewrite and query metadata.
         final boolean preFilterSearchShards = shouldPreFilterSearchShards(
             clusterState,
             searchRequest,
@@ -1111,7 +1112,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
             localShardIterators.size() + remoteShardIterators.size()
         );
         // Everything above was prep for executing the search like figuring out target shards
-        // and building the Connection to nodes containing them, now we start the search.
+        // and building the Connection to nodes containing them, now we start the phases of Search.
         searchAsyncActionProvider.asyncSearchAction(
             task,
             searchRequest,

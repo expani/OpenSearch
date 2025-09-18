@@ -24,6 +24,7 @@ public class AggregationReduceableSearchResult implements ReduceableSearchResult
         this.aggregations = aggregations;
     }
 
+    // This merges the built InternalAggregation[] into the QuerySearchResult
     @Override
     public void reduce(QuerySearchResult result) throws IOException {
         if (!result.hasAggs()) {
