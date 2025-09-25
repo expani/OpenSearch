@@ -66,6 +66,7 @@ public class DefaultAggregationProcessor implements AggregationProcessor {
             .get(GlobalAggCollectorManager.class);
         try {
             if (nonGlobalCollectorManager != null) {
+                // Called to merge the InternalAggs into QueryResult
                 nonGlobalCollectorManager.reduce(List.of()).reduce(context.queryResult());
             }
 

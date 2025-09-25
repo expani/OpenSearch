@@ -306,6 +306,7 @@ abstract class AbstractSearchAsyncAction<Result extends SearchPhaseResult> exten
                         @Override
                         public void innerOnResponse(Result result) {
                             try {
+                                // This consumes the search result and triggers fetch phase
                                 onShardResult(result, shardIt);
                             } finally {
                                 executeNext(pendingExecutions, thread);
@@ -817,6 +818,7 @@ abstract class AbstractSearchAsyncAction<Result extends SearchPhaseResult> exten
      */
     final void onPhaseDone() {  // as a tribute to @kimchy aka. finishHim()
         final SearchPhase nextPhase = getNextPhase(results, this);
+        // TODO [DF] : We might need to avoid this in first phase for DF
         if (request instanceof PipelinedRequest && nextPhase != null) {
             ((PipelinedRequest) request).transformSearchPhaseResults(results, this, this.getName(), nextPhase.getName());
         }

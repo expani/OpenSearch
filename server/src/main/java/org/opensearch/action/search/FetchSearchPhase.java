@@ -133,6 +133,7 @@ final class FetchSearchPhase extends SearchPhase {
         final int numShards = context.getNumShards();
         final boolean isScrollSearch = context.getRequest().scroll() != null;
         final List<SearchPhaseResult> phaseResults = queryResults.asList();
+        // Reducing after response from every target shard.
         final SearchPhaseController.ReducedQueryPhase reducedQueryPhase = resultConsumer.reduce();
         final boolean queryAndFetchOptimization = queryResults.length() == 1;
         final Runnable finishPhase = () -> moveToNextPhase(
@@ -150,6 +151,7 @@ final class FetchSearchPhase extends SearchPhase {
             finishPhase.run();
         } else {
             ScoreDoc[] scoreDocs = reducedQueryPhase.sortedTopDocs.scoreDocs;
+            // IIUC This means docIds to load for every shard ?
             final List<Integer>[] docIdsToLoad = searchPhaseController.fillDocIdsToLoad(numShards, scoreDocs);
             // no docs to fetch -- sidestep everything and return
             if (scoreDocs.length == 0) {

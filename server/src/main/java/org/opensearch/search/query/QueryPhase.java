@@ -158,6 +158,7 @@ public class QueryPhase {
             rescoreProcessor.process(searchContext);
         }
         suggestProcessor.process(searchContext);
+        // This is where the aggregation results are pushed into QueryResult
         aggregationProcessor.postProcess(searchContext);
 
         if (searchContext.getProfilers() != null) {
@@ -352,6 +353,7 @@ public class QueryPhase {
         }
         QuerySearchResult queryResult = searchContext.queryResult();
         try {
+            // TODO : This needs to be skipped
             searcher.search(query, queryCollector);
         } catch (EarlyTerminatingCollector.EarlyTerminationException e) {
             // EarlyTerminationException is not caught in ContextIndexSearcher to allow force termination of collection. Postcollection
