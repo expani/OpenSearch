@@ -91,7 +91,7 @@ import static org.opensearch.core.util.FileSystemUtils.isAccessibleDirectory;
  *
  * @opensearch.internal
  */
-@ExperimentalApi //This cannot be experimental, need to bypass error
+@ExperimentalApi // This cannot be experimental, need to bypass error
 public class PluginsService implements ReportingService<PluginsAndModules> {
 
     private static final Logger logger = LogManager.getLogger(PluginsService.class);

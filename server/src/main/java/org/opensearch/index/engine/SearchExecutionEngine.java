@@ -10,7 +10,6 @@ package org.opensearch.index.engine;
 
 import org.opensearch.common.annotation.ExperimentalApi;
 
-import java.util.ArrayList;
 import java.util.Map;
 
 /**

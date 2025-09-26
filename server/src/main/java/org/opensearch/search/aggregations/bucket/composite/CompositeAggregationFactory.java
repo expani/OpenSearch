@@ -47,7 +47,7 @@ import java.util.Map;
  *
  * @opensearch.internal
  */
-class CompositeAggregationFactory extends AggregatorFactory {
+public class CompositeAggregationFactory extends AggregatorFactory {
     private final int size;
     private final CompositeValuesSourceConfig[] sources;
     private final CompositeKey afterKey;
@@ -81,5 +81,9 @@ class CompositeAggregationFactory extends AggregatorFactory {
     @Override
     protected boolean supportsConcurrentSegmentSearch() {
         return true;
+    }
+
+    public CompositeValuesSourceConfig[] getSources() {
+        return sources;
     }
 }

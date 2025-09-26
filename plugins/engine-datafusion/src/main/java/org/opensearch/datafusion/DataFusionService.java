@@ -50,11 +50,12 @@ public class DataFusionService extends AbstractLifecycleComponent {
             logger.info("DataFusion service started successfully. Version info: {}", version);
 
             // Create a default context with parquet file path from path.repo setting
-            String repoPath = environment.settings().get("path.data")
-                .trim().replaceAll("^\\[|]$", "");
+            String repoPath = environment.settings().get("path.data").trim().replaceAll("^\\[|]$", "");
             if (repoPath.isEmpty()) {
-                throw new RuntimeException("path.repo setting is required for DataFusion service. " +
-                    "Please configure it using -PrepoPath when starting OpenSearch.");
+                throw new RuntimeException(
+                    "path.repo setting is required for DataFusion service. "
+                        + "Please configure it using -PrepoPath when starting OpenSearch."
+                );
             }
 
             logger.info("DataFusion service started successfully. Repo path: {}", repoPath);
@@ -64,8 +65,9 @@ public class DataFusionService extends AbstractLifecycleComponent {
 
             // Check if the parquet file exists
             if (!Files.exists(parquetFile)) {
-                throw new RuntimeException("Parquet file not found at: " + parquetFile +
-                    ". Please place your parquet file in the OpenSearch data directory.");
+                throw new RuntimeException(
+                    "Parquet file not found at: " + parquetFile + ". Please place your parquet file in the OpenSearch data directory."
+                );
             }
 
             defaultSessionContext = new SessionContext(parquetFile.toString(), "hits");
@@ -97,7 +99,6 @@ public class DataFusionService extends AbstractLifecycleComponent {
         // Ensure all resources are cleaned up
         doStop();
     }
-
 
     /**
      * Get a context by id

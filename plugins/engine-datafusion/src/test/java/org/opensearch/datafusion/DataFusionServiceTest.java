@@ -8,19 +8,20 @@
 
 package org.opensearch.datafusion;
 
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.Assume;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.datafusion.core.SessionContext;
 import org.opensearch.env.Environment;
-import org.opensearch.common.settings.Settings;
+import org.junit.Before;
+import org.junit.Test;
 
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.Files;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Unit tests for DataFusionService
@@ -40,9 +41,7 @@ public class DataFusionServiceTest {
         Path tempDataDir = Files.createTempDirectory("opensearch-test-data");
 
         // Create test environment with the temp directory and path.repo setting
-        Settings settings = Settings.builder()
-            .put("path.repo", tempDataDir.toString())
-            .build();
+        Settings settings = Settings.builder().put("path.repo", tempDataDir.toString()).build();
 
         testEnvironment = new Environment(settings, null);
 

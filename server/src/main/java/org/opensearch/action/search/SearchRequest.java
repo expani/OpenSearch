@@ -125,7 +125,6 @@ public class SearchRequest extends ActionRequest implements IndicesRequest.Repla
 
     private Boolean phaseTook = null;
 
-
     public SearchRequest() {
         this.localClusterAlias = null;
         this.absoluteStartMillis = DEFAULT_ABSOLUTE_START_MILLIS;

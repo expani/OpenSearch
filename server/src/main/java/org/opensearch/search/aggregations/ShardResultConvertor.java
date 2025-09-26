@@ -8,14 +8,11 @@
 
 package org.opensearch.search.aggregations;
 
-/**
- * Experimental
- * @opensearch.internal
- */
-public interface SearchResultsCollector<T> {
+import java.util.List;
+import java.util.Map;
 
-    /**
-     * collect
-     */
-    void collect(T value);
+public interface ShardResultConvertor {
+
+    List<InternalAggregation> convert(Map<String, Object[]> shardResult);
+
 }

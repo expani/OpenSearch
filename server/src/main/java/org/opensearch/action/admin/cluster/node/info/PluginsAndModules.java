@@ -50,7 +50,7 @@ import java.util.List;
  *
  * @opensearch.internal
  */
-@ExperimentalApi //This cannot be experimental, need to bypass error
+@ExperimentalApi // This cannot be experimental, need to bypass error
 public class PluginsAndModules implements ReportingService.Info {
     private final List<PluginInfo> plugins;
     private final List<PluginInfo> modules;

@@ -79,7 +79,6 @@ import org.opensearch.search.rescore.RescoreContext;
 import org.opensearch.search.sort.SortAndFormats;
 import org.opensearch.search.suggest.SuggestionSearchContext;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -542,8 +541,7 @@ public abstract class SearchContext implements Releasable {
         return false;
     }
 
-    public void setDFResults(Map<String, Object[]> dfResults) {
-    }
+    public void setDFResults(Map<String, Object[]> dfResults) {}
 
     public Map<String, Object[]> getDFResults() {
         return Collections.emptyMap();

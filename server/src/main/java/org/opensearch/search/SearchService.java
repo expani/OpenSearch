@@ -98,7 +98,6 @@ import org.opensearch.index.shard.SearchOperationListener;
 import org.opensearch.indices.IndicesService;
 import org.opensearch.indices.cluster.IndicesClusterStateService.AllocatedIndices.IndexRemovalReason;
 import org.opensearch.node.ResponseCollectorService;
-import org.opensearch.plugins.SearchEnginePlugin;
 import org.opensearch.plugins.SearchPlugin;
 import org.opensearch.script.FieldScript;
 import org.opensearch.script.ScriptService;
@@ -662,15 +661,15 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
     /**
      * Try to load the query results from the cache or execute the query phase directly if the cache cannot be used.
      */
-//    private void loadOrExecuteQueryPhase(final ShardSearchRequest request, final SearchContext context) throws Exception {
-//        final boolean canCache = indicesService.canCache(request, context);
-//        context.getQueryShardContext().freezeContext();
-//        if (canCache) {
-//            indicesService.loadIntoContext(request, context, queryPhase);
-//        } else {
-//            queryPhase.execute(context);
-//        }
-//    }
+    // private void loadOrExecuteQueryPhase(final ShardSearchRequest request, final SearchContext context) throws Exception {
+    // final boolean canCache = indicesService.canCache(request, context);
+    // context.getQueryShardContext().freezeContext();
+    // if (canCache) {
+    // indicesService.loadIntoContext(request, context, queryPhase);
+    // } else {
+    // queryPhase.execute(context);
+    // }
+    // }
 
     public void executeQueryPhase(
         ShardSearchRequest request,
@@ -734,16 +733,17 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
             try (SearchOperationListenerExecutor executor = new SearchOperationListenerExecutor(context)) {
                 // TODO we need to do the query phase using the data fusion execution
 
-                //TODO : Set the results here
+                // TODO : Set the results here
                 byte[] substraitQuery = request.source().queryPlanIR();
                 if (substraitQuery != null) {
                     SearchExecutionEngine searchExecutionEngine = readerContext.indexShard().getSearchExecutionEngine();
+                    // TODO : This should be batched.
                     Map<String, Object[]> result = searchExecutionEngine.execute(substraitQuery);
                     context.setDFResults(result);
                 }
 
                 queryPhase.execute(context);
-//                loadOrExecuteQueryPhase(request, context);
+                // loadOrExecuteQueryPhase(request, context);
                 if (context.queryResult().hasSearchContext() == false && readerContext.singleSession()) {
                     freeReaderContext(readerContext.id());
                 }
