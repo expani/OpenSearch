@@ -318,6 +318,10 @@ public class DatafusionEngine extends SearchExecEngine<DatafusionContext, Datafu
                             }
                             finalRes.put(fieldName, fieldValues);
                         }
+                        logger.info("Final Results for batch:");
+                        for (Map.Entry<String, Object[]> entry : finalRes.entrySet()) {
+                            logger.info("{}: {}", entry.getKey(), java.util.Arrays.toString(entry.getValue()));
+                        }
                     }
                 };
                 loadNextBatch(stream, executor, collector, finalRes, allocator, listener, context, rowIdResult);
@@ -327,10 +331,7 @@ public class DatafusionEngine extends SearchExecEngine<DatafusionContext, Datafu
 //            printMemoryPoolAllocation(datafusionService.getRuntimePointer());
 
 
-//            logger.info("Final Results:");
-//            for (Map.Entry<String, Object[]> entry : finalRes.entrySet()) {
-//                logger.info("{}: {}", entry.getKey(), java.util.Arrays.toString(entry.getValue()));
-//            }
+
 
         } catch (Exception exception) {
             logger.error("Failed to execute Substrait query plan", exception);

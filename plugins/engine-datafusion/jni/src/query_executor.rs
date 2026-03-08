@@ -222,6 +222,9 @@ pub async fn execute_query_with_cross_rt_stream(
         }
     };
 
+    println!("==== Logical Plan from Substrait ====");
+    println!("{}", logical_plan.display_indent());
+
     let is_aggregation_query = is_aggs_query(&logical_plan);
 
     // For non-aggregation queries, we apply a two-phase optimization strategy to ensure
@@ -258,6 +261,9 @@ pub async fn execute_query_with_cross_rt_stream(
         }
     };
 
+    println!("==== Logical Plan after DataFusion Optimization ====");
+    println!("{}", dataframe.logical_plan().display_indent());
+
     let mut physical_plan = dataframe.clone().create_physical_plan().await?;
 
     // For non-aggregation queries, we need to return absolute row IDs to identify specific rows
@@ -272,6 +278,9 @@ pub async fn execute_query_with_cross_rt_stream(
             .expect("Failed to optimize physical plan");
     }
 
+    // Add:
+    println!("==== Physical Execution Plan ====");
+    println!("{}", datafusion::physical_plan::displayable(physical_plan.as_ref()).indent(true));
 
     if is_query_plan_explain_enabled {
         println!("---- Explain plan ----");
