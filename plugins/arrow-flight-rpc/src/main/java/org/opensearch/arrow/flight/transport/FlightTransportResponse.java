@@ -14,7 +14,9 @@ import org.apache.arrow.flight.FlightRuntimeException;
 import org.apache.arrow.flight.FlightStream;
 import org.apache.arrow.flight.HeaderCallOption;
 import org.apache.arrow.flight.Ticket;
+import org.apache.arrow.vector.VectorLoader;
 import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.VectorUnloader;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.core.common.io.stream.NamedWriteableRegistry;
@@ -36,7 +38,7 @@ import static org.opensearch.arrow.flight.transport.ClientHeaderMiddleware.CORRE
  * <p>Handles streaming responses from Arrow Flight servers with lazy batch processing.
  * Headers are extracted when first accessed, and responses are deserialized on demand.
  */
-class FlightTransportResponse<T extends TransportResponse> implements StreamTransportResponse<T> {
+public class FlightTransportResponse<T extends TransportResponse> implements StreamTransportResponse<T> {
     private static final Logger logger = LogManager.getLogger(FlightTransportResponse.class);
 
     private final FlightStream flightStream;
@@ -135,6 +137,40 @@ class FlightTransportResponse<T extends TransportResponse> implements StreamTran
         } finally {
             logSlowOperation(startTime);
         }
+    }
+
+    /**
+     * POC: Advances the stream and returns the raw VectorSchemaRoot without deserialization.
+     * Returns null when stream is exhausted.
+     */
+    public VectorSchemaRoot nextNativeBatch() {
+        ensureOpen();
+        initializeStreamIfNeeded();
+        if (streamExhausted) return null;
+
+        VectorSchemaRoot source;
+        if (!firstResponseConsumed) {
+            firstResponseConsumed = true;
+            source = currentRoot;
+        } else {
+            try {
+                if (flightStream.next()) {
+                    source = flightStream.getRoot();
+                } else {
+                    streamExhausted = true;
+                    return null;
+                }
+            } catch (FlightRuntimeException e) {
+                streamExhausted = true;
+                throw FlightErrorMapper.fromFlightException(e);
+            }
+        }
+        // Deep copy — Flight reuses the same VectorSchemaRoot across next() calls
+        VectorSchemaRoot copy = VectorSchemaRoot.create(source.getSchema(), source.getFieldVectors().get(0).getAllocator());
+        VectorLoader loader = new VectorLoader(copy);
+        VectorUnloader unloader = new VectorUnloader(source, /*includeNullCount=*/true, /*alignBuffers=*/true);
+        loader.load(unloader.getRecordBatch());
+        return copy;
     }
 
     /**

@@ -45,9 +45,9 @@ impl PartialAggregationOptimizer {
         let new_children = new_children?;
 
         if let Some(agg) = plan.as_any().downcast_ref::<AggregateExec>() {
-            let needs_partial = agg.aggr_expr().iter().any(|e| {
-                e.fun().name().eq_ignore_ascii_case("approx_distinct")
-            });
+            // POC: force Partial mode for all aggregates (distributed reduction)
+            let needs_partial = true;
+            log::info!("[POC] PartialAggOptimizer: mode={:?}, needs_partial={}", agg.mode(), needs_partial);
 
             if needs_partial {
                 return match agg.mode() {

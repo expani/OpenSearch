@@ -132,7 +132,9 @@ public class ServerConfig {
     @SuppressWarnings("removal")
     public static void init(Settings settings) {
         AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            System.setProperty("arrow.allocation.manager.type", ARROW_ALLOCATION_MANAGER_TYPE.get(settings));
+            // POC: Don't set arrow.allocation.manager.type globally — it forces Netty allocator
+            // on all classloaders (e.g. parquet-data-format) which don't have arrow-memory-netty.
+            // Each module will use whatever allocator is on its own classpath.
             System.setProperty("arrow.enable_null_check_for_get", Boolean.toString(ARROW_ENABLE_NULL_CHECK_FOR_GET.get(settings)));
             System.setProperty("arrow.enable_unsafe_memory_access", Boolean.toString(ARROW_ENABLE_UNSAFE_MEMORY_ACCESS.get(settings)));
             System.setProperty("arrow.memory.debug.allocator", Boolean.toString(ARROW_ENABLE_DEBUG_ALLOCATOR.get(settings)));

@@ -30,6 +30,7 @@ opensearchplugin {
 
 dependencies {
     api project(':libs:opensearch-vectorized-exec-spi')
+    api project(':plugins:arrow-flight-rpc')
     implementation "org.apache.logging.log4j:log4j-api:${versions.log4j}"
     implementation "org.apache.logging.log4j:log4j-core:${versions.log4j}"
 
@@ -39,11 +40,11 @@ dependencies {
     api "com.fasterxml.jackson.core:jackson-annotations:${versions.jackson}"
 
     // Apache Arrow dependencies for memory management
-    implementation "org.apache.arrow:arrow-memory-core:18.3.0"
-    implementation "org.apache.arrow:arrow-memory-unsafe:18.3.0"
-    implementation "org.apache.arrow:arrow-vector:18.3.0"
-    implementation "org.apache.arrow:arrow-c-data:18.3.0"
-    implementation "org.apache.arrow:arrow-format:18.3.0"
+    implementation "org.apache.arrow:arrow-memory-core:${versions.arrow}"
+    implementation "org.apache.arrow:arrow-memory-unsafe:${versions.arrow}"
+    implementation "org.apache.arrow:arrow-vector:${versions.arrow}"
+    implementation "org.apache.arrow:arrow-c-data:${versions.arrow}"
+    implementation "org.apache.arrow:arrow-format:${versions.arrow}"
     // SLF4J API for Arrow logging compatibility
     implementation "org.slf4j:slf4j-api:${versions.slf4j}"
     // CheckerFramework annotations required by Arrow 17.0.0

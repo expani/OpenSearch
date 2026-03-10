@@ -47,12 +47,26 @@ public class StreamSearchTransportService extends SearchTransportService {
 
     private final StreamTransportService transportService;
 
+    /** POC: static reference for coordinator fanout from regular TransportSearchAction */
+    private static volatile StreamTransportService STREAM_TRANSPORT_INSTANCE;
+
     public StreamSearchTransportService(
         StreamTransportService transportService,
         BiFunction<Transport.Connection, SearchActionListener, ActionListener> responseWrapper
     ) {
         super(transportService, responseWrapper);
         this.transportService = transportService;
+        STREAM_TRANSPORT_INSTANCE = transportService;
+    }
+
+    /** POC: expose stream transport for coordinator fanout */
+    public StreamTransportService getStreamTransportService() {
+        return transportService;
+    }
+
+    /** POC: get the stream transport instance from anywhere */
+    public static StreamTransportService getStreamTransportInstance() {
+        return STREAM_TRANSPORT_INSTANCE;
     }
 
     public static final Setting<Boolean> STREAM_SEARCH_ENABLED = Setting.boolSetting(

@@ -63,6 +63,7 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.Strings;
 import org.opensearch.core.common.breaker.CircuitBreaker;
 import org.opensearch.core.common.io.stream.NamedWriteableRegistry;
+import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.Writeable;
 import org.opensearch.core.index.Index;
 import org.opensearch.core.index.shard.ShardId;
@@ -97,8 +98,10 @@ import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.transport.RemoteClusterAware;
 import org.opensearch.transport.RemoteClusterService;
 import org.opensearch.transport.RemoteTransportException;
+import org.opensearch.transport.StreamTransportResponseHandler;
 import org.opensearch.transport.StreamTransportService;
 import org.opensearch.transport.Transport;
+import org.opensearch.transport.TransportRequestOptions;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.Client;
 import org.opensearch.transport.client.OriginSettingClient;
@@ -108,6 +111,7 @@ import org.opensearch.wlm.WorkloadGroupTask;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -181,6 +185,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
     private final MetricsRegistry metricsRegistry;
 
     private TaskResourceTrackingService taskResourceTrackingService;
+    final TransportService transportService;
 
     @Inject
     public TransportSearchAction(
@@ -204,6 +209,7 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
         super(SearchAction.NAME, transportService, actionFilters, (Writeable.Reader<SearchRequest>) SearchRequest::new);
         this.client = client;
         this.threadPool = threadPool;
+        this.transportService = transportService;
         this.circuitBreaker = circuitBreakerService.getBreaker(CircuitBreaker.REQUEST);
         this.searchPhaseController = searchPhaseController;
         this.searchTransportService = searchTransportService;
@@ -310,6 +316,13 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
 
     @Override
     protected void doExecute(Task task, SearchRequest searchRequest, ActionListener<SearchResponse> listener) {
+        // POC: intercept native queries with queryPlanIR → fan out PartialAggAction via stream transport
+        if (searchRequest.source() != null && searchRequest.source().queryPlanIR() != null) {
+            logger.info("[POC] Coordinator: detected queryPlanIR, dispatching PartialAgg fanout");
+            executePartialAggFanout(task, searchRequest, listener);
+            return;
+        }
+
         // only if task is of type CancellableTask and support cancellation on timeout, treat this request eligible for timeout based
         // cancellation. There may be other top level requests like AsyncSearch which is using SearchRequest internally and has it's own
         // cancellation mechanism. For such cases, the SearchRequest when created can override the createTask and set the
@@ -324,7 +337,162 @@ public class TransportSearchAction extends HandledTransportAction<SearchRequest,
             );
         }
         executeRequest(task, searchRequest, this::searchAsyncAction, listener);
-        //logger.info("Search request received is {}", searchRequest.source());
+        logger.info("Search request received is {}", searchRequest.source());
+    }
+
+    /**
+     * POC: Coordinator fanout — sends PartialAggRequest to each shard's node via stream transport,
+     * collects native Arrow batches, and returns a SearchResponse.
+     */
+    private void executePartialAggFanout(Task task, SearchRequest searchRequest, ActionListener<SearchResponse> listener) {
+        try {
+            final ClusterState clusterState = clusterService.state();
+            final Index[] indices = indexNameExpressionResolver.concreteIndices(clusterState, searchRequest);
+            final String[] concreteIndices = new String[indices.length];
+            for (int i = 0; i < indices.length; i++) {
+                concreteIndices[i] = indices[i].getName();
+            }
+
+            GroupShardsIterator<ShardIterator> shardRoutings = clusterService.operationRouting()
+                .searchShards(clusterState, concreteIndices, null, searchRequest.preference(), null, null, null);
+
+            final byte[] substraitBytes = searchRequest.source().queryPlanIR();
+            final DiscoveryNodes nodes = clusterState.nodes();
+
+            // Collect shard targets
+            List<ShardId> shardIds = new ArrayList<>();
+            List<DiscoveryNode> targetNodes = new ArrayList<>();
+            for (ShardIterator shardIt : shardRoutings) {
+                ShardId shardId = shardIt.shardId();
+                // Pick first available shard routing (primary preferred)
+                var routing = shardIt.nextOrNull();
+                if (routing == null) {
+                    listener.onFailure(new IllegalStateException("No shard routing for " + shardId));
+                    return;
+                }
+                DiscoveryNode node = nodes.get(routing.currentNodeId());
+                shardIds.add(shardId);
+                targetNodes.add(node);
+                logger.info("[POC] Coordinator: shard={} -> node={}", shardId, node.getName());
+            }
+
+            final int totalShards = shardIds.size();
+            final CountDown countDown = new CountDown(totalShards);
+            final AtomicReference<Exception> failure = new AtomicReference<>();
+            final AtomicInteger totalBatches = new AtomicInteger(0);
+            final List<Object> allBatches = Collections.synchronizedList(new ArrayList<>());
+
+            // Use stream transport to reach the PartialAgg handler
+            final TransportService sendService;
+            StreamTransportService streamTransport = StreamSearchTransportService.getStreamTransportInstance();
+            if (streamTransport != null) {
+                sendService = streamTransport;
+                logger.info("[POC] Using StreamTransportService for fanout");
+            } else {
+                sendService = transportService;
+                logger.info("[POC] StreamTransportService not available, using regular transport");
+            }
+
+            for (int i = 0; i < totalShards; i++) {
+                final ShardId shardId = shardIds.get(i);
+                final DiscoveryNode node = targetNodes.get(i);
+                final String indexName = shardId.getIndex().getName();
+
+                PartialAggRequest request = new PartialAggRequest(indexName, shardId, substraitBytes);
+                Transport.Connection connection = sendService.getConnection(node);
+
+                sendService.sendRequest(
+                    connection,
+                    "indices:data/read/partial_agg",
+                    request,
+                    TransportRequestOptions.builder().withType(TransportRequestOptions.Type.STREAM).build(),
+                    new StreamTransportResponseHandler<PartialAggResponse>() {
+                        @Override
+                        public PartialAggResponse read(StreamInput in) throws IOException {
+                            return new PartialAggResponse(in);
+                        }
+
+                        @Override
+                        public void handleStreamResponse(
+                            org.opensearch.transport.stream.StreamTransportResponse<PartialAggResponse> response
+                        ) {
+                            logger.info("[POC] Coordinator: received stream response for shard={}", shardId);
+                            int batches = 0;
+                            try {
+                                Object batch;
+                                while ((batch = response.nextNativeBatch()) != null) {
+                                    batches++;
+                                    allBatches.add(batch);
+                                }
+                            } catch (Exception e) {
+                                logger.warn("[POC] Error reading stream for shard={}", shardId, e);
+                            } finally {
+                                try { response.close(); } catch (IOException e) { logger.warn("close error", e); }
+                            }
+                            totalBatches.addAndGet(batches);
+                            logger.info("[POC] Coordinator: shard={} delivered {} batches", shardId, batches);
+                            if (countDown.countDown()) {
+                                onAllShardsComplete(totalShards, totalBatches.get(), allBatches, listener);
+                            }
+                        }
+
+                        @Override
+                        public void handleResponse(PartialAggResponse response) {
+                            logger.info("[POC] Coordinator: non-stream response for shard={}", shardId);
+                            if (countDown.countDown()) {
+                                onAllShardsComplete(totalShards, totalBatches.get(), allBatches, listener);
+                            }
+                        }
+
+                        @Override
+                        public void handleException(org.opensearch.transport.TransportException exp) {
+                            logger.error("[POC] Coordinator: shard={} failed", shardId, exp);
+                            failure.compareAndSet(null, exp);
+                            if (countDown.countDown()) {
+                                listener.onFailure(failure.get());
+                            }
+                        }
+
+                        @Override
+                        public String executor() {
+                            return ThreadPool.Names.SEARCH;
+                        }
+                    }
+                );
+            }
+        } catch (Exception e) {
+            logger.error("[POC] Coordinator fanout failed", e);
+            listener.onFailure(e);
+        }
+    }
+
+    private void onAllShardsComplete(int totalShards, int totalBatches, List<Object> allBatches, ActionListener<SearchResponse> listener) {
+        logger.info("[POC] Coordinator: all {} shards complete, {} total batches received", totalShards, totalBatches);
+
+        PartialAggMergeService mergeSvc = PartialAggMergeService.Holder.get();
+        if (mergeSvc == null || allBatches.isEmpty()) {
+            logger.warn("[POC] No merge service or no batches");
+            listener.onResponse(new SearchResponse(InternalSearchResponse.empty(), null, totalShards, totalShards, 0, 0,
+                ShardSearchFailure.EMPTY_ARRAY, SearchResponse.Clusters.EMPTY));
+            return;
+        }
+
+        String mergeSql = "SELECT category, SUM(cnt) as cnt, SUM(total) as total "
+            + "FROM partial GROUP BY category ORDER BY category";
+
+        try {
+            java.util.List<java.util.Map<String, Object>> rows = mergeSvc.merge(allBatches, mergeSql).join();
+            logger.info("[POC] FinalAgg result: {} rows", rows.size());
+            for (java.util.Map<String, Object> row : rows) {
+                logger.info("[POC]   {}", row);
+            }
+            // TODO: build proper aggregation response
+            listener.onResponse(new SearchResponse(InternalSearchResponse.empty(), null, totalShards, totalShards, 0, 0,
+                ShardSearchFailure.EMPTY_ARRAY, SearchResponse.Clusters.EMPTY));
+        } catch (Exception e) {
+            logger.error("[POC] FinalAgg failed", e);
+            listener.onFailure(e);
+        }
     }
 
     /**

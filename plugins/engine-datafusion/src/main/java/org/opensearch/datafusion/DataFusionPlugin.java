@@ -15,10 +15,10 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.arrow.flight.transport.FlightStreamPlugin;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.node.DiscoveryNodes;
 import org.opensearch.cluster.service.ClusterService;
-import org.opensearch.common.cache.CacheType;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.IndexScopedSettings;
 import org.opensearch.common.settings.Setting;
@@ -26,9 +26,13 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.common.settings.SettingsFilter;
 import org.opensearch.core.common.io.stream.NamedWriteableRegistry;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
+import org.opensearch.action.search.PartialAggMergeService;
+import org.opensearch.datafusion.action.DataFusionMergeService;
 import org.opensearch.datafusion.action.DataFusionAction;
 import org.opensearch.datafusion.action.NodesDataFusionInfoAction;
+import org.opensearch.datafusion.action.PartialAggAction;
 import org.opensearch.datafusion.action.TransportNodesDataFusionInfoAction;
+import org.opensearch.datafusion.action.TransportPartialAggAction;
 import org.opensearch.datafusion.search.DatafusionContext;
 import org.opensearch.datafusion.search.DatafusionQuery;
 import org.opensearch.datafusion.search.DatafusionReaderManager;
@@ -39,19 +43,15 @@ import org.opensearch.env.NodeEnvironment;
 import org.opensearch.index.shard.ShardPath;
 import org.opensearch.plugins.spi.vectorized.DataFormat;
 import org.opensearch.plugins.spi.vectorized.DataSourceCodec;
-import org.opensearch.search.ContextEngineSearcher;
 import org.opensearch.index.engine.SearchExecEngine;
 import org.opensearch.index.engine.exec.FileMetadata;
-import org.opensearch.plugins.ActionPlugin;
 import org.opensearch.plugins.SearchEnginePlugin;
-import org.opensearch.plugins.Plugin;
 import org.opensearch.repositories.RepositoriesService;
 import org.opensearch.rest.RestController;
 import org.opensearch.rest.RestHandler;
 import org.opensearch.script.ScriptService;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.transport.client.Client;
-import org.opensearch.vectorized.execution.search.spi.RecordBatchStream;
 import org.opensearch.watcher.ResourceWatcherService;
 
 import java.io.IOException;
@@ -64,41 +64,22 @@ import java.util.function.Supplier;
 import static org.opensearch.datafusion.core.DataFusionRuntimeEnv.DATAFUSION_MEMORY_POOL_CONFIGURATION;
 import static org.opensearch.datafusion.core.DataFusionRuntimeEnv.DATAFUSION_SPILL_MEMORY_LIMIT_CONFIGURATION;
 
-
 /**
  * Main plugin class for OpenSearch DataFusion integration.
- *
+ * Extends FlightStreamPlugin to inherit Flight transport registration (NetworkPlugin).
+ * This ensures "FLIGHT" transport is registered when stream transport flag is enabled.
  */
-public class DataFusionPlugin extends Plugin implements ActionPlugin, SearchEnginePlugin {
+public class DataFusionPlugin extends FlightStreamPlugin implements SearchEnginePlugin {
 
+    private static final Logger logger = LogManager.getLogger(DataFusionPlugin.class);
     private DataFusionService dataFusionService;
     private final boolean isDataFusionEnabled;
 
-    /**
-     * Constructor for DataFusionPlugin.
-     * @param settings The settings for the DataFusionPlugin.
-     */
     public DataFusionPlugin(Settings settings) {
-        // For now, DataFusion is always enabled if the plugin is loaded
-        // In the future, this could be controlled by a feature flag
+        super(settings);
         this.isDataFusionEnabled = true;
     }
 
-    /**
-     * Creates components for the DataFusion plugin.
-     * @param client The client instance.
-     * @param clusterService The cluster service instance.
-     * @param threadPool The thread pool instance.
-     * @param resourceWatcherService The resource watcher service instance.
-     * @param scriptService The script service instance.
-     * @param xContentRegistry The named XContent registry.
-     * @param environment The environment instance.
-     * @param nodeEnvironment The node environment instance.
-     * @param namedWriteableRegistry The named writeable registry.
-     * @param indexNameExpressionResolver The index name expression resolver instance.
-     * @param repositoriesServiceSupplier The supplier for the repositories service.
-     * @return Collection of created components
-     */
     @Override
     public Collection<Object> createComponents(
         Client client,
@@ -114,16 +95,21 @@ public class DataFusionPlugin extends Plugin implements ActionPlugin, SearchEngi
         Supplier<RepositoriesService> repositoriesServiceSupplier,
         Map<DataFormat, DataSourceCodec> dataSourceCodecs
     ) {
-        String spill_dir = Arrays.stream(environment.dataFiles()).findFirst().get().getParent().resolve("tmp").toAbsolutePath().toString();
+        // Flight components are created via Plugin.createComponents (inherited from FlightStreamPlugin)
+        // This method is called separately by the framework for SearchEnginePlugin
         if (!isDataFusionEnabled) {
             return Collections.emptyList();
         }
+
+        String spill_dir = Arrays.stream(environment.dataFiles()).findFirst().get().getParent().resolve("tmp").toAbsolutePath().toString();
         dataFusionService = new DataFusionService(dataSourceCodecs, clusterService, spill_dir);
 
-        for(DataFormat format : this.getSupportedFormats()) {
+        PartialAggMergeService.Holder.set(new DataFusionMergeService());
+
+        for (DataFormat format : this.getSupportedFormats()) {
             dataSourceCodecs.get(format);
         }
-        // return Collections.emptyList();
+
         return Collections.singletonList(dataFusionService);
     }
 
@@ -132,29 +118,12 @@ public class DataFusionPlugin extends Plugin implements ActionPlugin, SearchEngi
         return List.of(DataFormat.CSV);
     }
 
-    /**
-     * Create engine per shard per format with initial view of catalog
-     */
-    // TODO : one engine per format, does that make sense ?
-    // TODO : Engine shouldn't just be SearcherOperations, it can be more ?
     @Override
-    public SearchExecEngine<DatafusionContext, DatafusionSearcher,
-            DatafusionReaderManager, DatafusionQuery>
-        createEngine(DataFormat dataFormat,Collection<FileMetadata> formatCatalogSnapshot, ShardPath shardPath) throws IOException {
+    public SearchExecEngine<DatafusionContext, DatafusionSearcher, DatafusionReaderManager, DatafusionQuery>
+        createEngine(DataFormat dataFormat, Collection<FileMetadata> formatCatalogSnapshot, ShardPath shardPath) throws IOException {
         return new DatafusionEngine(dataFormat, formatCatalogSnapshot, dataFusionService, shardPath);
     }
 
-    /**
-     * Gets the REST handlers for the DataFusion plugin.
-     * @param settings The settings for the plugin.
-     * @param restController The REST controller instance.
-     * @param clusterSettings The cluster settings instance.
-     * @param indexScopedSettings The index scoped settings instance.
-     * @param settingsFilter The settings filter instance.
-     * @param indexNameExpressionResolver The index name expression resolver instance.
-     * @param nodesInCluster The supplier for the discovery nodes.
-     * @return A list of REST handlers.
-     */
     @Override
     public List<RestHandler> getRestHandlers(
         Settings settings,
@@ -165,45 +134,33 @@ public class DataFusionPlugin extends Plugin implements ActionPlugin, SearchEngi
         IndexNameExpressionResolver indexNameExpressionResolver,
         Supplier<DiscoveryNodes> nodesInCluster
     ) {
-        if (!isDataFusionEnabled) {
-            return Collections.emptyList();
+        List<RestHandler> handlers = new ArrayList<>(super.getRestHandlers(
+            settings, restController, clusterSettings, indexScopedSettings,
+            settingsFilter, indexNameExpressionResolver, nodesInCluster
+        ));
+        if (isDataFusionEnabled) {
+            handlers.add(new DataFusionAction());
         }
-        return List.of(new DataFusionAction());
+        return handlers;
     }
 
     @Override
     public List<Setting<?>> getSettings() {
-        List<Setting<?>> settingList = new ArrayList<>();
-
+        List<Setting<?>> settingList = new ArrayList<>(super.getSettings());
         settingList.add(DATAFUSION_MEMORY_POOL_CONFIGURATION);
         settingList.add(DATAFUSION_SPILL_MEMORY_LIMIT_CONFIGURATION);
-        settingList.addAll(Stream.of(
-                CacheSettings.CACHE_SETTINGS,
-                CacheSettings.CACHE_ENABLED)
+        settingList.addAll(Stream.of(CacheSettings.CACHE_SETTINGS, CacheSettings.CACHE_ENABLED)
             .flatMap(x -> x.stream()).collect(Collectors.toList()));
-
         return settingList;
     }
 
-    /**
-     * Gets the list of action handlers for the DataFusion plugin.
-     * @return A list of action handlers.
-     */
     @Override
     public List<ActionHandler<?, ?>> getActions() {
-        if (!isDataFusionEnabled) {
-            return Collections.emptyList();
+        List<ActionHandler<?, ?>> actions = new ArrayList<>(super.getActions());
+        if (isDataFusionEnabled) {
+            actions.add(new ActionHandler<>(NodesDataFusionInfoAction.INSTANCE, TransportNodesDataFusionInfoAction.class));
+            actions.add(new ActionHandler<>(PartialAggAction.INSTANCE, TransportPartialAggAction.class));
         }
-        return List.of(new ActionHandler<>(NodesDataFusionInfoAction.INSTANCE, TransportNodesDataFusionInfoAction.class));
+        return actions;
     }
-//
-//    @Override
-//    public List<Setting<?>> getSettings() {
-//        return Stream.of(
-//                CacheSettings.CACHE_SETTINGS,
-//                CacheSettings.CACHE_ENABLED)
-//            .flatMap(x -> x.stream())
-//            .collect(Collectors.toList()).add(MEMORY_POOL_CONFIGURATION_DATAFUSION);
-//
-//    }
 }

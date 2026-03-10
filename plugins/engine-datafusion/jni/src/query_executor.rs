@@ -145,6 +145,8 @@ pub async fn execute_query_with_cross_rt_stream(
     config.options_mut().execution.parquet.pushdown_filters = false;
     config.options_mut().execution.target_partitions = target_partitions;
     config.options_mut().execution.batch_size = 8192;
+    // POC: disable skip-partial heuristic so Partial agg always runs
+    config.options_mut().execution.skip_partial_aggregation_probe_ratio_threshold = 1.0;
 
     let state = datafusion::execution::SessionStateBuilder::new()
         .with_config(config.clone())
@@ -260,6 +262,8 @@ pub async fn execute_query_with_cross_rt_stream(
     };
 
     let mut physical_plan = dataframe.clone().create_physical_plan().await?;
+
+    println!("[POC] Physical plan:\n{}", datafusion::physical_plan::displayable(physical_plan.as_ref()).indent(true));
 
     // For non-aggregation queries, we need to return absolute row IDs to identify specific rows
     // The AbsoluteRowIdOptimizer works at the physical plan level to transform relative row IDs

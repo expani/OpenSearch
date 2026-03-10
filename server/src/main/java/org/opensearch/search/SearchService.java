@@ -836,9 +836,11 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
                     }
                 }
                 boolean isNativeQuery = orig.source() != null && orig.source().queryPlanIR() != null;
+                logger.info("[POC] isNativeQuery={}, queryPlanIR={}", isNativeQuery, orig.source() != null ? (orig.source().queryPlanIR() != null ? "present" : "null") : "no source");
 
                 // Execute
                 if (isNativeQuery) {
+                    logger.info("[POC] routing to executeNativeQueryPhaseAsync");
                     getExecutor(executorName, shard).execute(new ActionRunnable<SearchPhaseResult>(listener) {
                         @Override
                         protected void doRun() throws Exception {
@@ -969,6 +971,7 @@ public class SearchService extends AbstractLifecycleComponent implements IndexEv
         boolean isStreamSearch,
         ActionListener<SearchPhaseResult> listener
     ) {
+        logger.info("[POC] executeNativeQueryPhaseAsync isStreamSearch={}", isStreamSearch);
 
         final ReaderContext readerContext;
         try {

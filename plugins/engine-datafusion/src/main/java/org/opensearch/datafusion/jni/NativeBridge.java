@@ -83,4 +83,13 @@ public final class NativeBridge {
      * Used to verify that sliced arrays across FFI boundary are handled correctly
      **/
     public static native void createTestSlicedArray(int offset, int length, ActionListener<long[]> listener);
+
+    /**
+     * POC: Execute final aggregation over partial Arrow batches.
+     * @param schemaPtrs array of FFI_ArrowSchema pointers (one per batch)
+     * @param arrayPtrs array of FFI_ArrowArray pointers (one per batch)
+     * @param mergeSql SQL query to run over the "partial" table
+     * @param listener callback with stream pointer
+     */
+    public static native void executeFinalAgg(long[] schemaPtrs, long[] arrayPtrs, String mergeSql, ActionListener<Long> listener);
 }

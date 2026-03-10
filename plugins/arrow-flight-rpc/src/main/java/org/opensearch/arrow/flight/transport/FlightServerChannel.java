@@ -38,7 +38,7 @@ import static org.opensearch.arrow.flight.transport.FlightErrorMapper.mapFromCal
  * TcpChannel implementation for Arrow Flight. It is created per call in ArrowFlightProducer.
  * This implementation is not thread safe; consumer must ensure to invoke sendBatch serially and call completeStream() at the end
  */
-class FlightServerChannel implements TcpChannel {
+public class FlightServerChannel implements TcpChannel {
     private static final String PROFILE_NAME = "flight";
 
     private final Logger logger = LogManager.getLogger(FlightServerChannel.class);
@@ -92,6 +92,31 @@ class FlightServerChannel implements TcpChannel {
      */
     public ExecutorService getExecutor() {
         return executor;
+    }
+
+    /**
+     * Sends a native Arrow batch directly, bypassing VectorStreamOutput serialization.
+     * POC: used for streaming partial aggregation results.
+     */
+    public void sendNativeBatch(ByteBuffer header, VectorSchemaRoot nativeRoot) {
+        if (cancelled) {
+            throw StreamException.cancelled("Cannot flush more batches. Stream cancelled by the client");
+        }
+        if (!open.get()) {
+            throw new IllegalStateException("FlightServerChannel already closed.");
+        }
+        if (root.isEmpty()) {
+            middleware.setHeader(header);
+            root = Optional.of(nativeRoot);
+            serverStreamListener.start(root.get());
+        } else {
+            root = Optional.of(nativeRoot);
+        }
+        serverStreamListener.putNext();
+        if (callTracker != null) {
+            long rootSize = FlightUtils.calculateVectorSchemaRootSize(root.get());
+            callTracker.recordBatchSent(rootSize, 0);
+        }
     }
 
     /**

@@ -901,3 +901,141 @@ pub extern "system" fn Java_org_opensearch_datafusion_jni_NativeBridge_streamClo
 ) {
     let _ = unsafe { Box::from_raw(stream as *mut RecordBatchStreamAdapter<CrossRtStream>) };
 }
+
+
+// ===== POC: Final Aggregation =====
+
+/// Imports Arrow batches via C Data Interface and runs final aggregation
+/// using a hardcoded merge SQL over a MemTable of partial batches.
+#[no_mangle]
+pub extern "system" fn Java_org_opensearch_datafusion_jni_NativeBridge_executeFinalAgg(
+    mut env: JNIEnv,
+    _class: JClass,
+    schema_ptrs: JLongArray,
+    array_ptrs: JLongArray,
+    merge_sql: JString,
+    listener: JObject,
+) {
+    use arrow_array::ffi::from_ffi;
+    use arrow_schema::ffi::FFI_ArrowSchema;
+    use arrow_array::ffi::FFI_ArrowArray;
+    use arrow_array::{RecordBatch, StructArray};
+    use datafusion::datasource::MemTable;
+    use datafusion::execution::context::SessionContext;
+
+    let manager = match TOKIO_RUNTIME_MANAGER.get() {
+        Some(m) => m,
+        None => {
+            set_action_listener_error(&mut env, listener,
+                &DataFusionError::Execution("Runtime manager not initialized".to_string()));
+            return;
+        }
+    };
+
+    let sql: String = match env.get_string(&merge_sql) {
+        Ok(s) => s.into(),
+        Err(e) => {
+            set_action_listener_error(&mut env, listener,
+                &DataFusionError::Execution(format!("Failed to get SQL string: {}", e)));
+            return;
+        }
+    };
+
+    // Extract FFI pointers
+    let n_schemas = env.get_array_length(&schema_ptrs).unwrap_or(0) as usize;
+    let n_arrays = env.get_array_length(&array_ptrs).unwrap_or(0) as usize;
+    if n_schemas == 0 || n_schemas != n_arrays {
+        set_action_listener_error(&mut env, listener,
+            &DataFusionError::Execution(format!("Mismatched ptrs: {} schemas, {} arrays", n_schemas, n_arrays)));
+        return;
+    }
+
+    let mut schema_vals = vec![0i64; n_schemas];
+    let mut array_vals = vec![0i64; n_arrays];
+    env.get_long_array_region(&schema_ptrs, 0, &mut schema_vals).unwrap();
+    env.get_long_array_region(&array_ptrs, 0, &mut array_vals).unwrap();
+
+    // Import batches from FFI
+    let mut batches: Vec<RecordBatch> = Vec::with_capacity(n_schemas);
+    for i in 0..n_schemas {
+        let ffi_schema = unsafe { &*(schema_vals[i] as *const FFI_ArrowSchema) };
+        let ffi_array = unsafe { std::ptr::replace(array_vals[i] as *mut FFI_ArrowArray, FFI_ArrowArray::empty()) };
+        match unsafe { from_ffi(ffi_array, ffi_schema) } {
+            Ok(mut array_data) => {
+                array_data.align_buffers();
+                let struct_array = StructArray::from(array_data);
+                let batch = RecordBatch::from(struct_array);
+                log_info!("[POC] FinalAgg: imported batch {}: {} rows, schema={:?}", i, batch.num_rows(), batch.schema());
+                batches.push(batch);
+            }
+            Err(e) => {
+                set_action_listener_error(&mut env, listener,
+                    &DataFusionError::Execution(format!("FFI import failed: {}", e)));
+                return;
+            }
+        }
+    }
+
+    if batches.is_empty() {
+        set_action_listener_error(&mut env, listener,
+            &DataFusionError::Execution("No batches imported".to_string()));
+        return;
+    }
+
+    let listener_ref = match env.new_global_ref(&listener) {
+        Ok(r) => r,
+        Err(e) => {
+            set_action_listener_error(&mut env, listener,
+                &DataFusionError::Execution(format!("GlobalRef failed: {}", e)));
+            return;
+        }
+    };
+
+    let io_runtime = manager.io_runtime.clone();
+
+    io_runtime.spawn(async move {
+        let result = async {
+            let schema = batches[0].schema();
+            let ctx = SessionContext::new();
+            let table = MemTable::try_new(schema.clone(), vec![batches])?;
+            ctx.register_table("partial", Arc::new(table))?;
+
+            log_info!("[POC] FinalAgg: running SQL: {}", sql);
+            let df = ctx.sql(&sql).await?;
+            let result_batches = df.collect().await?;
+
+            for (idx, rb) in result_batches.iter().enumerate() {
+                log_info!("[POC] FinalAgg: result batch {}: {} rows, cols={:?}", idx, rb.num_rows(),
+                    rb.schema().fields().iter().map(|f| f.name().as_str()).collect::<Vec<_>>());
+            }
+
+            // Concat and export via FFI
+            let result_schema = result_batches[0].schema();
+            let merged = arrow::compute::concat_batches(&result_schema, &result_batches)
+                .map_err(|e| DataFusionError::Execution(format!("concat: {}", e)))?;
+
+            log_info!("[POC] FinalAgg: merged batch has {} rows", merged.num_rows());
+
+            let struct_array: StructArray = merged.into();
+            let array_data = struct_array.into_data();
+            let ffi_schema = FFI_ArrowSchema::try_from(result_schema.as_ref())
+                .map_err(|e| DataFusionError::Execution(format!("FFI schema export: {}", e)))?;
+            let ffi_array = FFI_ArrowArray::new(&array_data);
+
+            let schema_ptr = Box::into_raw(Box::new(ffi_schema)) as jlong;
+            let array_ptr = Box::into_raw(Box::new(ffi_array)) as jlong;
+            let pair = Box::into_raw(Box::new([schema_ptr, array_ptr]));
+            Ok::<jlong, DataFusionError>(pair as jlong)
+        }.await;
+
+        with_jni_env(|env| {
+            match result {
+                Ok(ptr) => set_action_listener_ok_global(env, &listener_ref, ptr),
+                Err(e) => {
+                    log_error!("[POC] FinalAgg failed: {}", e);
+                    set_action_listener_error_global(env, &listener_ref, &e);
+                }
+            }
+        });
+    });
+}

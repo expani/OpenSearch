@@ -76,15 +76,10 @@ import org.opensearch.vectorized.execution.search.spi.QueryResult;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyMap;
 
@@ -253,15 +248,13 @@ public class DatafusionEngine extends SearchExecEngine<DatafusionContext, Datafu
                         }
                     }
                 }
+                logger.info("Final Results:");
+                for (Map.Entry<String, List<Object>> entry : finalRes.entrySet()) {
+                    logger.info("{}: {}", entry.getKey(), entry.getValue().stream().map(Object::toString).toList());
+                }
             };
 
             collector.collect(new RecordBatchIterator(stream));
-
-//            logger.info("Final Results:");
-//            for (Map.Entry<String, Object[]> entry : finalRes.entrySet()) {
-//                logger.info("{}: {}", entry.getKey(), java.util.Arrays.toString(entry.getValue()));
-//            }
-
 
 //            logger.info("Memory Pool Allocation Post Query ShardID:{}", context.getQueryShardContext().getShardId());
 //            printMemoryPoolAllocation(datafusionService.getRuntimePointer());
@@ -327,6 +320,10 @@ public class DatafusionEngine extends SearchExecEngine<DatafusionContext, Datafu
                             } else {
                                 finalResColumns.put(fieldName, fieldValues);
                             }
+                        }
+                        logger.info("Final Results:");
+                        for (Map.Entry<String, List<Object>> entry : finalResColumns.entrySet()) {
+                            logger.info("{}: {}", entry.getKey(), entry.getValue().stream().map(Object::toString).toList());
                         }
                     }
                 };
