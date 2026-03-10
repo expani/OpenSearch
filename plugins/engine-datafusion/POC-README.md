@@ -12,6 +12,19 @@ source=test_groupby | stats count() as cnt, sum(amount) as total by category | s
 
 Setup: See [engine-datafusion README](README.md) for prerequisites (SQL plugin branch, maven local publish, gradle run command). The POC test uses a 2-shard index — create it with the steps below, then run the hardcoded query.
 
+### Gradle Config (build.gradle)
+
+The following must be added to `allprojects` → `testClusters` in the root `build.gradle`:
+
+```groovy
+setting 'opensearch.experimental.feature.transport.stream.enabled', 'true'
+systemProperty 'io.netty.allocator.numDirectArenas', '1'
+systemProperty 'io.netty.noUnsafe', 'false'
+systemProperty 'io.netty.tryUnsafe', 'true'
+systemProperty 'io.netty.tryReflectionSetAccessible', 'true'
+jvmArgs '--add-opens=java.base/java.nio=ALL-UNNAMED'
+```
+
 ### Index Setup
 
 ```bash
