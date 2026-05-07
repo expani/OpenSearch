@@ -624,28 +624,17 @@ pub unsafe extern "C" fn df_execute_with_context(
     plan_ptr: *const u8,
     plan_len: i64,
 ) -> i64 {
-    // Consume the session context handle on entry. Ownership transfers here
-    // regardless of whether the remainder of this function succeeds, returns an
-    // error via `?`, or panics — RAII (or `catch_unwind` drop-during-unwind)
-    // drops `session_handle` and frees the underlying SessionContext resources.
-    //
-    // This matches the Java-side contract: SessionContextHandle.markConsumed() is
-    // invoked in a `finally` after the FFM downcall, so every observable path from
-    // Java's perspective ("call.invoke ran") maps to "Rust consumed the handle".
-    // If we were to run fallible or panic-prone code (e.g. `get_rt_manager()?`)
-    // before Box::from_raw, the handle would leak on those paths.
     let session_handle = *Box::from_raw(session_ctx_ptr as *mut crate::session_context::SessionContextHandle);
 
     let mgr = get_rt_manager()?;
     let plan_bytes = slice::from_raw_parts(plan_ptr, plan_len as usize);
     let cpu_executor = mgr.cpu_executor();
 
-    // Route based on whether the session was configured for indexed execution
-    let handle_ref = &*(session_ctx_ptr as *const crate::session_context::SessionContextHandle);
-    if handle_ref.indexed_config.is_some() {
+    if session_handle.indexed_config.is_some() {
+        let ptr = Box::into_raw(Box::new(session_handle)) as i64;
         mgr.io_runtime
             .block_on(crate::indexed_executor::execute_indexed_with_context(
-                session_ctx_ptr,
+                ptr,
                 plan_bytes.to_vec(),
                 cpu_executor,
             ))
