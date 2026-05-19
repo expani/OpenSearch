@@ -139,9 +139,7 @@ public class OpenSearchTableScan extends TableScan implements OpenSearchRelNode 
         // RelOptTable still reports the wide schema — and isthmus emits Substrait based on
         // the table's rowType, not the rel's. Copy the RelOptTable with the narrowed rowType
         // so the stripped scan carries the correct schema all the way to FragmentConvertor.
-        RelOptTable table = overrideRowType != null && getTable() instanceof RelOptTableImpl impl
-            ? impl.copy(overrideRowType)
-            : getTable();
+        RelOptTable table = overrideRowType != null && getTable() instanceof RelOptTableImpl impl ? impl.copy(overrideRowType) : getTable();
         return LogicalTableScan.create(getCluster(), table, List.of());
     }
 }

@@ -108,13 +108,13 @@ public final class OpenSearchLateMaterializationRewriter {
         AnchorContext ctx = findAnchor(root);
         if (ctx == null) return Optional.empty();
         if (!isChainAllowed(ctx.parentChain)) {
-            LOGGER.debug("[QTF] above-allow-list rejected; skipping rewrite");
+            LOGGER.debug("[QTF] above-allow-list rejected {}; skipping rewrite", ABOVE_ALLOWED);
             return Optional.empty();
         }
         OpenSearchSort anchor = ctx.anchor;
         BelowSubtree below = analyzeBelow(anchor.getInput());
         if (below == null) {
-            LOGGER.debug("[QTF] below-allow-list rejected; skipping rewrite");
+            LOGGER.debug("[QTF] below-allow-list {} rejected; skipping rewrite", BELOW_INTERMEDIATE_ALLOWED);
             return Optional.empty();
         }
 
@@ -154,9 +154,7 @@ public final class OpenSearchLateMaterializationRewriter {
         }
         for (int i = chainTopDown.size() - 1; i >= 0; i--) {
             RelNode n = chainTopDown.get(i);
-            if (n instanceof OpenSearchSort sort
-                && !sort.getCollation().getFieldCollations().isEmpty()
-                && sort.fetch != null) {
+            if (n instanceof OpenSearchSort sort && !sort.getCollation().getFieldCollations().isEmpty() && sort.fetch != null) {
                 return new AnchorContext(sort, chainTopDown.subList(0, i));
             }
         }
@@ -225,7 +223,8 @@ public final class OpenSearchLateMaterializationRewriter {
      */
     private static FetchPlan planFetch(OpenSearchSort anchor, List<RelNode> parentChain, BelowSubtree below) {
         Set<Integer> sortColsAnchor = new HashSet<>();
-        for (RelFieldCollation fc : anchor.getCollation().getFieldCollations()) sortColsAnchor.add(fc.getFieldIndex());
+        for (RelFieldCollation fc : anchor.getCollation().getFieldCollations())
+            sortColsAnchor.add(fc.getFieldIndex());
         Set<Integer> sortColsScan = toScanSpace(sortColsAnchor, below.belowProjOutToScan);
 
         Set<Integer> filterColsScan = new HashSet<>();
@@ -266,7 +265,8 @@ public final class OpenSearchLateMaterializationRewriter {
     private static Set<Integer> toScanSpace(Set<Integer> anchorIdxs, int[] belowProjOutToScan) {
         if (belowProjOutToScan == null) return anchorIdxs;
         Set<Integer> out = new HashSet<>(anchorIdxs.size());
-        for (int idx : anchorIdxs) out.add(belowProjOutToScan[idx]);
+        for (int idx : anchorIdxs)
+            out.add(belowProjOutToScan[idx]);
         return out;
     }
 
@@ -280,7 +280,8 @@ public final class OpenSearchLateMaterializationRewriter {
         if (parentChain.isEmpty()) return out;
         RelNode immediate = parentChain.get(parentChain.size() - 1);
         if (immediate instanceof OpenSearchProject p) {
-            for (RexNode expr : p.getProjects()) out.addAll(RelNodeUtils.collectInputRefs(expr));
+            for (RexNode expr : p.getProjects())
+                out.addAll(RelNodeUtils.collectInputRefs(expr));
         } else if (immediate instanceof OpenSearchFilter f) {
             out.addAll(RelNodeUtils.collectInputRefs(f.getCondition()));
         }
@@ -328,49 +329,60 @@ public final class OpenSearchLateMaterializationRewriter {
         int[] remapAnchor = remapScan;
         for (int i = below.chain.size() - 1; i >= 0; i--) {
             RelNode orig = below.chain.get(i);
-            if (orig instanceof OpenSearchFilter f) {
-                RexNode remapped = f.getCondition().accept(new IndexRemapShuttle(remapScan, rebuilt.getRowType()));
-                rebuilt = new OpenSearchFilter(f.getCluster(), f.getTraitSet(), rebuilt, remapped, f.getViableBackends());
-            } else if (orig instanceof OpenSearchProject p) {
-                List<RexNode> newProjects = new ArrayList<>();
-                List<String> newNames = new ArrayList<>();
-                int[] outputRemap = new int[below.belowProjOutToScan.length];
-                Arrays.fill(outputRemap, -1);
-                for (int origOut = 0; origOut < below.belowProjOutToScan.length; origOut++) {
-                    int newScanIdx = remapScan[below.belowProjOutToScan[origOut]];
-                    if (newScanIdx < 0) continue; // source dropped (now fetched)
-                    RelDataTypeField field = rebuilt.getRowType().getFieldList().get(newScanIdx);
-                    outputRemap[origOut] = newProjects.size();
-                    newProjects.add(new RexInputRef(newScanIdx, field.getType()));
-                    newNames.add(p.getRowType().getFieldList().get(origOut).getName());
+            switch (orig) {
+                case OpenSearchFilter f -> {
+                    RexNode remapped = f.getCondition().accept(new IndexRemapShuttle(remapScan, rebuilt.getRowType()));
+                    rebuilt = new OpenSearchFilter(f.getCluster(), f.getTraitSet(), rebuilt, remapped, f.getViableBackends());
                 }
-                int rowIdIdx = rebuilt.getRowType().getFieldCount() - 1;
-                RelDataTypeField rowIdField = rebuilt.getRowType().getFieldList().get(rowIdIdx);
-                newProjects.add(new RexInputRef(rowIdIdx, rowIdField.getType()));
-                newNames.add(OpenSearchLateMaterialization.ROW_ID_FIELD);
-                RelDataTypeFactory.Builder pb = typeFactory.builder();
-                for (int j = 0; j < newProjects.size(); j++) pb.add(newNames.get(j), newProjects.get(j).getType());
-                rebuilt = new OpenSearchProject(p.getCluster(), p.getTraitSet(), rebuilt, newProjects, pb.build(), p.getViableBackends());
-                remapAnchor = outputRemap;
-            } else if (orig instanceof OpenSearchExchangeReducer er) {
-                // UGSI on the wire is an INTEGER ordinal — coord maintains the ordinal →
-                // (shardOrd, indexUUID, nodeId) mapping side-table for the Scatter-Gather stage.
-                RelDataType erRowType = RelNodeUtils.appendField(
-                    typeFactory,
-                    rebuilt.getRowType(),
-                    OpenSearchLateMaterialization.UGSI_FIELD,
-                    typeFactory.createSqlType(SqlTypeName.INTEGER)
-                );
-                rebuilt = new OpenSearchExchangeReducer(
-                    er.getCluster(),
-                    er.getTraitSet(),
-                    rebuilt,
-                    er.getViableBackends(),
-                    er.getExchangeInfo(),
-                    erRowType
-                );
-            } else {
-                throw new IllegalStateException("Unexpected below-anchor operator: " + orig.getClass().getSimpleName());
+                case OpenSearchProject p -> {
+                    List<RexNode> newProjects = new ArrayList<>();
+                    List<String> newNames = new ArrayList<>();
+                    int[] outputRemap = new int[below.belowProjOutToScan.length];
+                    Arrays.fill(outputRemap, -1);
+                    for (int origOut = 0; origOut < below.belowProjOutToScan.length; origOut++) {
+                        int newScanIdx = remapScan[below.belowProjOutToScan[origOut]];
+                        if (newScanIdx < 0) continue; // source dropped (now fetched)
+                        RelDataTypeField field = rebuilt.getRowType().getFieldList().get(newScanIdx);
+                        outputRemap[origOut] = newProjects.size();
+                        newProjects.add(new RexInputRef(newScanIdx, field.getType()));
+                        newNames.add(p.getRowType().getFieldList().get(origOut).getName());
+                    }
+                    int rowIdIdx = rebuilt.getRowType().getFieldCount() - 1;
+                    RelDataTypeField rowIdField = rebuilt.getRowType().getFieldList().get(rowIdIdx);
+                    newProjects.add(new RexInputRef(rowIdIdx, rowIdField.getType()));
+                    newNames.add(OpenSearchLateMaterialization.ROW_ID_FIELD);
+                    RelDataTypeFactory.Builder pb = typeFactory.builder();
+                    for (int j = 0; j < newProjects.size(); j++)
+                        pb.add(newNames.get(j), newProjects.get(j).getType());
+                    rebuilt = new OpenSearchProject(
+                        p.getCluster(),
+                        p.getTraitSet(),
+                        rebuilt,
+                        newProjects,
+                        pb.build(),
+                        p.getViableBackends()
+                    );
+                    remapAnchor = outputRemap;
+                }
+                case OpenSearchExchangeReducer er -> {
+                    // UGSI on the wire is an INTEGER ordinal — coord maintains the ordinal →
+                    // (shardOrd, indexUUID, nodeId) mapping side-table for the Scatter-Gather stage.
+                    RelDataType erRowType = RelNodeUtils.appendField(
+                        typeFactory,
+                        rebuilt.getRowType(),
+                        OpenSearchLateMaterialization.UGSI_FIELD,
+                        typeFactory.createSqlType(SqlTypeName.INTEGER)
+                    );
+                    rebuilt = new OpenSearchExchangeReducer(
+                        er.getCluster(),
+                        er.getTraitSet(),
+                        rebuilt,
+                        er.getViableBackends(),
+                        er.getExchangeInfo(),
+                        erRowType
+                    );
+                }
+                default -> throw new IllegalStateException("Unexpected below-anchor operator: " + orig.getClass().getSimpleName());
             }
         }
         return new SubtreeRebuild(rebuilt, remapAnchor);
@@ -438,53 +450,61 @@ public final class OpenSearchLateMaterializationRewriter {
         RelNode newChild = rebuildParents(origChild, origAnchor, wrapper, remap);
         boolean immediate = origChild == origAnchor;
 
-        if (current instanceof OpenSearchProject project) {
-            List<RexNode> newExprs = project.getProjects();
-            if (immediate) {
-                IndexRemapShuttle shuttle = new IndexRemapShuttle(remap, newChild.getRowType());
-                newExprs = new ArrayList<>(project.getProjects().size());
-                for (RexNode expr : project.getProjects()) newExprs.add(expr.accept(shuttle));
-            }
-            return project.copy(project.getTraitSet(), newChild, newExprs, project.getRowType());
-        }
-        if (current instanceof OpenSearchFilter filter) {
-            RexNode cond = immediate ? filter.getCondition().accept(new IndexRemapShuttle(remap, newChild.getRowType())) : filter.getCondition();
-            return filter.copy(filter.getTraitSet(), newChild, cond);
-        }
-        if (current instanceof OpenSearchSort sort) {
-            RelCollation coll = sort.getCollation();
-            if (immediate) {
-                List<RelFieldCollation> remapped = new ArrayList<>(sort.getCollation().getFieldCollations().size());
-                for (RelFieldCollation fc : sort.getCollation().getFieldCollations()) {
-                    int newIdx = remap[fc.getFieldIndex()];
-                    if (newIdx < 0) {
-                        throw new IllegalStateException("Above-anchor Sort references dropped col at idx " + fc.getFieldIndex());
-                    }
-                    remapped.add(fc.withFieldIndex(newIdx));
+        switch (current) {
+            case OpenSearchProject project -> {
+                List<RexNode> newExprs = project.getProjects();
+                if (immediate) {
+                    IndexRemapShuttle shuttle = new IndexRemapShuttle(remap, newChild.getRowType());
+                    newExprs = new ArrayList<>(project.getProjects().size());
+                    for (RexNode expr : project.getProjects())
+                        newExprs.add(expr.accept(shuttle));
                 }
-                coll = RelCollations.of(remapped);
+                return project.copy(project.getTraitSet(), newChild, newExprs, project.getRowType());
             }
-            return sort.copy(sort.getTraitSet(), newChild, coll, sort.offset, sort.fetch);
+            case OpenSearchFilter filter -> {
+                RexNode cond = immediate
+                    ? filter.getCondition().accept(new IndexRemapShuttle(remap, newChild.getRowType()))
+                    : filter.getCondition();
+                return filter.copy(filter.getTraitSet(), newChild, cond);
+            }
+            case OpenSearchSort sort -> {
+                RelCollation coll = sort.getCollation();
+                if (immediate) {
+                    List<RelFieldCollation> remapped = new ArrayList<>(sort.getCollation().getFieldCollations().size());
+                    for (RelFieldCollation fc : sort.getCollation().getFieldCollations()) {
+                        int newIdx = remap[fc.getFieldIndex()];
+                        if (newIdx < 0) {
+                            throw new IllegalStateException("Above-anchor Sort references dropped col at idx " + fc.getFieldIndex());
+                        }
+                        remapped.add(fc.withFieldIndex(newIdx));
+                    }
+                    coll = RelCollations.of(remapped);
+                }
+                return sort.copy(sort.getTraitSet(), newChild, coll, sort.offset, sort.fetch);
+            }
+            case OpenSearchAggregate agg -> {
+                // Aggregate above-anchor — first cut: copy with new input. GroupSet/aggCalls remap is a TODO.
+                return agg.copy(agg.getTraitSet(), List.of(newChild));
+                // Aggregate above-anchor — first cut: copy with new input. GroupSet/aggCalls remap is a TODO.
+            }
+            default -> {
+                throw new IllegalStateException("Unexpected above-anchor operator: " + current.getClass().getSimpleName());
+            }
         }
-        if (current instanceof OpenSearchAggregate agg) {
-            // Aggregate above-anchor — first cut: copy with new input. GroupSet/aggCalls remap is a TODO.
-            return agg.copy(agg.getTraitSet(), List.of(newChild));
-        }
-        throw new IllegalStateException("Unexpected above-anchor operator: " + current.getClass().getSimpleName());
     }
 
     // ── Records ────────────────────────────────────────────────────────
 
-    private record AnchorContext(OpenSearchSort anchor, List<RelNode> parentChain) {}
+    private record AnchorContext(OpenSearchSort anchor, List<RelNode> parentChain) {
+    }
 
-    private record BelowSubtree(List<RelNode> chain, int[] belowProjOutToScan, OpenSearchTableScan scan) {}
+    private record BelowSubtree(List<RelNode> chain, int[] belowProjOutToScan, OpenSearchTableScan scan) {
+    }
 
-    private record SubtreeRebuild(RelNode rebuiltSubtree, int[] remapAnchor) {}
+    private record SubtreeRebuild(RelNode rebuiltSubtree, int[] remapAnchor) {
+    }
 
-    private record FetchPlan(
-        List<Integer> keepBelowScanIndices,
-        List<Integer> fetchedScanIndices,
-        List<RelDataTypeField> fetchFields,
-        List<FieldStorageInfo> fetchStorage
-    ) {}
+    private record FetchPlan(List<Integer> keepBelowScanIndices, List<Integer> fetchedScanIndices, List<RelDataTypeField> fetchFields, List<
+        FieldStorageInfo> fetchStorage) {
+    }
 }

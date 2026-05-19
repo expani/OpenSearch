@@ -21,7 +21,6 @@ import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.opensearch.analytics.planner.RelNodeUtils;
 import org.opensearch.analytics.spi.FieldStorageInfo;
-import org.opensearch.common.document.DocumentField;
 import org.opensearch.index.engine.dataformat.DocumentInput;
 
 import java.util.ArrayList;
@@ -118,7 +117,9 @@ public class OpenSearchLateMaterialization extends SingleRel implements OpenSear
         OpenSearchRelNode openSearchInput = (OpenSearchRelNode) RelNodeUtils.unwrapHep(getInput());
         List<FieldStorageInfo> inputStorage = openSearchInput.getOutputFieldStorage();
         List<RelDataTypeField> inputFields = getInput().getRowType().getFieldList();
-        List<FieldStorageInfo> out = new ArrayList<>(inputFields.size() - RESERVED_LATE_MATERIALIZATION_FIELDS.size() + fetchListStorage.size());
+        List<FieldStorageInfo> out = new ArrayList<>(
+            inputFields.size() - RESERVED_LATE_MATERIALIZATION_FIELDS.size() + fetchListStorage.size()
+        );
         for (int i = 0; i < inputFields.size(); i++) {
             if (RESERVED_LATE_MATERIALIZATION_FIELDS.contains(inputFields.get(i).getName())) continue;
             out.add(inputStorage.get(i));

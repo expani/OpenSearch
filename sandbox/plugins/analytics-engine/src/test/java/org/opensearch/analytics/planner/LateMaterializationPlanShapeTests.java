@@ -202,7 +202,16 @@ public class LateMaterializationPlanShapeTests extends BasePlannerRulesTests {
                     List<String> expected = new ArrayList<>(Arrays.asList(expectedNamesInOrder));
                     expected.add(OpenSearchLateMaterialization.ROW_ID_FIELD);
                     if (!expected.equals(actual)) {
-                        fail("Scan rowType mismatch.\n  expected: " + expected + "\n  actual:   " + actual + "\nSQL: " + sql + "\nPlan:\n" + plan);
+                        fail(
+                            "Scan rowType mismatch.\n  expected: "
+                                + expected
+                                + "\n  actual:   "
+                                + actual
+                                + "\nSQL: "
+                                + sql
+                                + "\nPlan:\n"
+                                + plan
+                        );
                     }
                 }
             };
@@ -216,7 +225,16 @@ public class LateMaterializationPlanShapeTests extends BasePlannerRulesTests {
                     List<String> actual = fieldNames(ctx.wrapper.getFetchList());
                     List<String> expected = Arrays.asList(expectedNamesInOrder);
                     if (!expected.equals(actual)) {
-                        fail("Wrapper fetchList mismatch.\n  expected: " + expected + "\n  actual:   " + actual + "\nSQL: " + sql + "\nPlan:\n" + plan);
+                        fail(
+                            "Wrapper fetchList mismatch.\n  expected: "
+                                + expected
+                                + "\n  actual:   "
+                                + actual
+                                + "\nSQL: "
+                                + sql
+                                + "\nPlan:\n"
+                                + plan
+                        );
                     }
                 }
             };
@@ -230,7 +248,16 @@ public class LateMaterializationPlanShapeTests extends BasePlannerRulesTests {
                     List<String> actual = fieldNames(ctx.wrapper.getRowType().getFieldList());
                     List<String> expected = Arrays.asList(expectedNamesInOrder);
                     if (!expected.equals(actual)) {
-                        fail("Wrapper output rowType mismatch.\n  expected: " + expected + "\n  actual:   " + actual + "\nSQL: " + sql + "\nPlan:\n" + plan);
+                        fail(
+                            "Wrapper output rowType mismatch.\n  expected: "
+                                + expected
+                                + "\n  actual:   "
+                                + actual
+                                + "\nSQL: "
+                                + sql
+                                + "\nPlan:\n"
+                                + plan
+                        );
                     }
                     if (actual.contains(OpenSearchLateMaterialization.ROW_ID_FIELD)
                         || actual.contains(OpenSearchLateMaterialization.UGSI_FIELD)) {
@@ -272,14 +299,30 @@ public class LateMaterializationPlanShapeTests extends BasePlannerRulesTests {
                         if (ctx.outerProject.getProjects().get(i) instanceof RexInputRef ref) {
                             actual[i] = ref.getIndex();
                         } else {
-                            fail("Outer Project expr [" + i + "] is not a RexInputRef: " + ctx.outerProject.getProjects().get(i)
-                                + "\nSQL: " + sql + "\nPlan:\n" + plan);
+                            fail(
+                                "Outer Project expr ["
+                                    + i
+                                    + "] is not a RexInputRef: "
+                                    + ctx.outerProject.getProjects().get(i)
+                                    + "\nSQL: "
+                                    + sql
+                                    + "\nPlan:\n"
+                                    + plan
+                            );
                             return;
                         }
                     }
                     if (!Arrays.equals(expectedIndices, actual)) {
-                        fail("Outer Project RexInputRef indices mismatch.\n  expected: " + Arrays.toString(expectedIndices)
-                            + "\n  actual:   " + Arrays.toString(actual) + "\nSQL: " + sql + "\nPlan:\n" + plan);
+                        fail(
+                            "Outer Project RexInputRef indices mismatch.\n  expected: "
+                                + Arrays.toString(expectedIndices)
+                                + "\n  actual:   "
+                                + Arrays.toString(actual)
+                                + "\nSQL: "
+                                + sql
+                                + "\nPlan:\n"
+                                + plan
+                        );
                     }
                 }
             };
@@ -292,13 +335,31 @@ public class LateMaterializationPlanShapeTests extends BasePlannerRulesTests {
                 void check(Inspector ctx, String sql, String plan) {
                     List<RelFieldCollation> fc = ctx.anchor.getCollation().getFieldCollations();
                     if (fc.size() != expected.length) {
-                        fail("Anchor collation size mismatch. expected=" + expected.length + " actual=" + fc.size()
-                            + "\nSQL: " + sql + "\nPlan:\n" + plan);
+                        fail(
+                            "Anchor collation size mismatch. expected="
+                                + expected.length
+                                + " actual="
+                                + fc.size()
+                                + "\nSQL: "
+                                + sql
+                                + "\nPlan:\n"
+                                + plan
+                        );
                     }
                     for (int i = 0; i < expected.length; i++) {
                         if (fc.get(i).getDirection() != expected[i]) {
-                            fail("Anchor collation[" + i + "] direction mismatch. expected=" + expected[i]
-                                + " actual=" + fc.get(i).getDirection() + "\nSQL: " + sql + "\nPlan:\n" + plan);
+                            fail(
+                                "Anchor collation["
+                                    + i
+                                    + "] direction mismatch. expected="
+                                    + expected[i]
+                                    + " actual="
+                                    + fc.get(i).getDirection()
+                                    + "\nSQL: "
+                                    + sql
+                                    + "\nPlan:\n"
+                                    + plan
+                            );
                         }
                     }
                 }
@@ -337,7 +398,8 @@ public class LateMaterializationPlanShapeTests extends BasePlannerRulesTests {
 
     private static List<String> fieldNames(List<RelDataTypeField> fields) {
         List<String> out = new ArrayList<>(fields.size());
-        for (RelDataTypeField f : fields) out.add(f.getName());
+        for (RelDataTypeField f : fields)
+            out.add(f.getName());
         return out;
     }
 

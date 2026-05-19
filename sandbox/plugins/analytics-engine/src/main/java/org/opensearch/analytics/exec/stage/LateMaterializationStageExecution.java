@@ -14,6 +14,8 @@ import org.opensearch.analytics.backend.ExchangeSource;
 import org.opensearch.analytics.exec.AnalyticsSearchTransportService;
 import org.opensearch.analytics.exec.QueryContext;
 import org.opensearch.analytics.exec.RowProducingSink;
+import org.opensearch.analytics.exec.stage.coordinator.ReduceStageExecution;
+import org.opensearch.analytics.exec.stage.shard.ShardFragmentStageExecution;
 import org.opensearch.analytics.planner.RelNodeUtils;
 import org.opensearch.analytics.planner.dag.Stage;
 import org.opensearch.analytics.planner.rel.OpenSearchLateMaterialization;
@@ -129,7 +131,7 @@ import java.util.List;
  *       {@code getFetchListStorage()} (List&lt;FieldStorageInfo&gt;).</li>
  *   <li>{@link ShardFragmentStageExecution} — closest existing analogue for transport
  *       fan-out + per-shard response handling.</li>
- *   <li>{@link LocalStageExecution} — closest existing analogue for "consumes child's
+ *   <li>{@link ReduceStageExecution} — closest existing analogue for "consumes child's
  *       reduce output, feeds parent."</li>
  *   <li>{@link AnalyticsSearchTransportService#dispatchFragmentStreaming} — pattern for
  *       Arrow-streaming RPC; the fetch transport is similar but with a different request

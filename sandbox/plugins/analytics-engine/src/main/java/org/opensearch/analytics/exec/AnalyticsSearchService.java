@@ -265,8 +265,11 @@ public class AnalyticsSearchService implements AutoCloseable {
         }
         if (rowIds == null || rowIds.length == 0 || columns == null || columns.length == 0) {
             throw new IllegalArgumentException(
-                "fetch on " + shard.shardId() + " requires non-empty rowIds and columns; got rowIds="
-                    + (rowIds == null ? "null" : rowIds.length) + ", columns="
+                "fetch on "
+                    + shard.shardId()
+                    + " requires non-empty rowIds and columns; got rowIds="
+                    + (rowIds == null ? "null" : rowIds.length)
+                    + ", columns="
                     + (columns == null ? "null" : columns.length)
             );
         }
@@ -281,7 +284,12 @@ public class AnalyticsSearchService implements AutoCloseable {
         }
         if (!hasRowIdField) {
             throw new IllegalArgumentException(
-                "columns must include " + DocumentInput.ROW_ID_FIELD + " for fetch on " + shard.shardId() + ", got " + java.util.Arrays.toString(columns)
+                "columns must include "
+                    + DocumentInput.ROW_ID_FIELD
+                    + " for fetch on "
+                    + shard.shardId()
+                    + ", got "
+                    + java.util.Arrays.toString(columns)
             );
         }
         ReaderContext readerContext = readerContextStore.acquireContext(queryId);
