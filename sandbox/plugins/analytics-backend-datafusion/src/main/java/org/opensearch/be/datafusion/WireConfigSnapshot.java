@@ -134,7 +134,7 @@ public final class WireConfigSnapshot {
      * Total: 72 bytes
      * </pre>
      *
-     * @param segment the target memory segment (at least 68 bytes)
+     * @param segment the target memory segment (at least {@link #BYTE_SIZE} bytes)
      */
     public void writeTo(MemorySegment segment) {
         // Offset 0: batch_size (i64)
@@ -180,7 +180,7 @@ public final class WireConfigSnapshot {
         private int maxCollectorParallelism = 1;
         private int singleCollectorStrategy = 2; // PageRangeSplit
         private int treeCollectorStrategy = 1;   // TightenOuterBounds
-        private int queryStrategy = 1;           // ListingTable (ShardTableProvider + ProjectRowIdOptimizer)
+        private int queryStrategy = 2;           // IndexedPredicateOnly (matches DatafusionSettings default "indexed")
 
         private Builder() {}
 

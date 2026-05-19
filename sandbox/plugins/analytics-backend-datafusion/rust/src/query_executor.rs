@@ -98,17 +98,14 @@ pub async fn execute_query(
     let ctx = SessionContext::new_with_state(state);
     crate::udf::register_all(&ctx);
 
-    // Register table provider based on strategy
+    // Register table provider based on strategy.
+    //
+    // Note: api::execute_query only routes to this function when the plan does NOT
+    // request row IDs (otherwise it dispatches to the indexed executor). The strategy
+    // therefore matters only for distinguishing the ShardTableProvider rewrite
+    // (ListingTable) from the plain ListingTable scan (None / IndexedPredicateOnly).
     use crate::datafusion_query_config::QueryStrategy;
     match query_config.query_strategy {
-        QueryStrategy::IndexedPredicateOnly => {
-            return Err(DataFusionError::Execution(
-                "IndexedPredicateOnly strategy requires the indexed executor path \
-                 (execute_indexed_with_context). It cannot be used via execute_query \
-                 because it needs segment metadata and PositionMap for position-based \
-                 row ID computation.".into(),
-            ));
-        }
         QueryStrategy::ListingTable => {
             use crate::shard_table_provider::{ShardTableConfig, ShardTableProvider};
 
@@ -138,7 +135,7 @@ pub async fn execute_query(
                 .map_err(|e| { error!("Failed to register table: {}", e); e })?;
         }
         _ => {
-            // Baseline / IndexedPredicateOnly: use standard ListingTable
+            // Baseline: use standard ListingTable
             let file_format = ParquetFormat::new();
             let listing_options = ListingOptions::new(Arc::new(file_format))
                 .with_file_extension(".parquet")
@@ -147,6 +144,7 @@ pub async fn execute_query(
                 .infer_schema(&ctx.state(), &table_path)
                 .await
                 .map_err(|e| { error!("Failed to infer schema: {}", e); e })?;
+            let resolved_schema = crate::schema_coerce::coerce_inferred_schema(resolved_schema);
             let table_config = ListingTableConfig::new(table_path)
                 .with_listing_options(listing_options)
                 .with_schema(resolved_schema);
@@ -166,23 +164,17 @@ pub async fn execute_query(
     let dataframe = ctx.execute_logical_plan(logical_plan).await?;
     let physical_plan = dataframe.create_physical_plan().await?;
 
-    // Apply row ID optimizer based on strategy if configured
+    // Apply row ID optimizer when ShardTableProvider injected `row_base`.
+    // For other strategies the vanilla scan output is already what the plan expects.
     use datafusion::physical_optimizer::PhysicalOptimizerRule;
     let physical_plan = match query_config.query_strategy {
-        QueryStrategy::None => {
-            // Baseline: no optimizer, ___row_id read as regular column (local IDs)
-            physical_plan
-        }
         QueryStrategy::ListingTable => {
-            // Apply ProjectRowIdOptimizer: rewrites ___row_id to ___row_id + row_base
+            // Rewrites ___row_id to ___row_id + row_base.
             let optimizer = crate::project_row_id_optimizer::ProjectRowIdOptimizer;
             let config = datafusion::common::config::ConfigOptions::default();
             optimizer.optimize(physical_plan, &config)?
         }
-        QueryStrategy::IndexedPredicateOnly => {
-            // Unreachable — we return an error above before reaching here
-            unreachable!()
-        }
+        _ => physical_plan,
     };
 
     let df_stream = execute_stream(physical_plan, ctx.task_ctx()).map_err(|e| {
@@ -246,6 +238,7 @@ pub async fn execute_with_context(
         let resolved_schema = listing_options
             .infer_schema(&handle.ctx.state(), &handle.table_path)
             .await?;
+        let resolved_schema = crate::schema_coerce::coerce_inferred_schema(resolved_schema);
 
         // Build ShardFileInfo with cumulative row_base from parquet metadata.
         let files = build_shard_file_infos(&store, handle.object_metas.as_ref()).await?;
