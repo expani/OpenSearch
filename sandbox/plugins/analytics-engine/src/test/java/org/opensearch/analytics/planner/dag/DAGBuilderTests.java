@@ -19,10 +19,19 @@ import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.analytics.planner.BasePlannerRulesTests;
+import org.opensearch.analytics.planner.CapabilityRegistry;
+import org.opensearch.analytics.planner.ClickBench;
+import org.opensearch.analytics.planner.FieldStorageResolver;
+import org.opensearch.analytics.planner.PlannerContext;
+import org.opensearch.analytics.planner.PlannerImpl;
+import org.opensearch.analytics.planner.RelNodeUtils;
+import org.opensearch.analytics.planner.SqlPlannerTestFixture;
 import org.opensearch.analytics.planner.rel.OpenSearchExchangeReducer;
+import org.opensearch.analytics.planner.rel.OpenSearchLateMaterialization;
 import org.opensearch.analytics.planner.rel.OpenSearchStageInputScan;
 import org.opensearch.analytics.planner.rel.OpenSearchTableScan;
 import org.opensearch.analytics.planner.rel.OpenSearchValues;
+import org.opensearch.cluster.ClusterState;
 
 import java.util.List;
 
@@ -145,5 +154,65 @@ public class DAGBuilderTests extends BasePlannerRulesTests {
         assertTrue("root fragment must be OpenSearchValues", dag.rootStage().getFragment() instanceof OpenSearchValues);
         assertNull("no TableScan → no ShardTargetResolver", dag.rootStage().getTargetResolver());
         assertNotNull("compute leaf needs a sink provider for its local backend output", dag.rootStage().getExchangeSinkProvider());
+    }
+
+    // ── QTF (late-materialization) DAG shapes ──────────────────────────────
+
+    /**
+     * Drives SQL through the full planner so the QTF rewriter fires, then runs the result
+     * through {@link DAGBuilder}. Returns the DAG with three stages for the typical QTF shape:
+     * Stage 0 = SHARD_FRAGMENT (Scan), Stage 1 = COORDINATOR_REDUCE (Sort+Limit), Stage 2 =
+     * LATE_MATERIALIZATION (root).
+     */
+    private QueryDAG buildQtfDag(String sql, int shardCount) {
+        ClusterState state = SqlPlannerTestFixture.clusterStateWith(ClickBench.INDEX, ClickBench.BASIC_FIELDS, "parquet", shardCount);
+        PlannerContext context = new PlannerContext(
+            new CapabilityRegistry(List.of(DATAFUSION, LUCENE), FieldStorageResolver::new),
+            state,
+            false
+        );
+        RelNode parsed = SqlPlannerTestFixture.parseSql(sql, state);
+        RelNode cbo = PlannerImpl.runAllOptimizations(parsed, context);
+        return DAGBuilder.build(cbo, context.getCapabilityRegistry(), mockClusterService());
+    }
+
+    /**
+     * Multi-shard QTF produces three stages: Shard Scan → Sort+Limit Reduce → LM Scatter-Gather.
+     * The LM stage is the root — outer Project (when present) sits inside the LM stage's
+     * fragment alongside the wrapper. Stage type detection finds {@code OpenSearchLateMaterialization}
+     * via tree walk, not strict instanceof on the fragment root.
+     */
+    public void testQtfDag_multiShardThreeStages() {
+        QueryDAG dag = buildQtfDag("SELECT URL, EventDate FROM hits ORDER BY EventDate LIMIT 10", 2);
+        assertBottomUpIds(dag.rootStage());
+
+        Stage root = dag.rootStage();
+        assertEquals(StageExecutionType.LATE_MATERIALIZATION, root.getExecutionType());
+        assertNotNull(
+            "root fragment must contain OpenSearchLateMaterialization wrapper",
+            RelNodeUtils.findNode(root.getFragment(), OpenSearchLateMaterialization.class)
+        );
+        assertEquals(1, root.getChildStages().size());
+
+        Stage reduce = root.getChildStages().get(0);
+        assertEquals(StageExecutionType.COORDINATOR_REDUCE, reduce.getExecutionType());
+        assertNotNull("LM cut must install OrdinalAppendingSink decorator on reducer", reduce.getInputSinkDecorator());
+        assertEquals(1, reduce.getChildStages().size());
+
+        Stage scan = reduce.getChildStages().get(0);
+        assertEquals(StageExecutionType.SHARD_FRAGMENT, scan.getExecutionType());
+        assertNull("scan stage carries no input decorator", scan.getInputSinkDecorator());
+        assertNotNull("scan stage must have a target resolver", scan.getTargetResolver());
+        assertEquals(0, scan.getChildStages().size());
+    }
+
+    /**
+     * Reducer stages outside QTF carry no {@code inputSinkDecorator} — confirms the decorator
+     * is a QTF-only attachment, not a regression on every reduce.
+     */
+    public void testReducerHasNoInputSinkDecoratorForNonQtf() {
+        QueryDAG dag = buildDAG(3, makeAggregate(sumCall()));
+        assertEquals(StageExecutionType.COORDINATOR_REDUCE, dag.rootStage().getExecutionType());
+        assertNull(dag.rootStage().getInputSinkDecorator());
     }
 }

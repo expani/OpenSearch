@@ -9,6 +9,7 @@
 package org.opensearch.analytics.planner.dag;
 
 import org.apache.calcite.rel.RelNode;
+import org.opensearch.analytics.exec.OrdinalAppendingSink;
 import org.opensearch.analytics.planner.CapabilityRegistry;
 import org.opensearch.analytics.planner.CapabilityResolutionUtils;
 import org.opensearch.analytics.planner.RelNodeUtils;
@@ -140,9 +141,25 @@ public class DAGBuilder {
             List<String> reduceViable = CapabilityResolutionUtils.filterByReduceCapability(registry, lm.getViableBackends());
             childSinkProvider = registry.getBackend(reduceViable.getFirst()).getExchangeSinkProvider();
         }
-        parentChildStages.add(
-            new Stage(childStageId, childFragment, grandchildren, /*exchangeInfo=*/ null, childSinkProvider, targetResolver)
+        Stage childStage = new Stage(
+            childStageId,
+            childFragment,
+            grandchildren,
+            /*exchangeInfo=*/ null,
+            childSinkProvider,
+            targetResolver
         );
+        // Multi-shard QTF: the child reducer feeds the LM stage. Stamp every
+        // shard's batches with their target.ordinal() as ___ugsi BEFORE the
+        // backend's reduce sees them, so the LM stage can group rows by source
+        // shard for fan-out fetches. Single-shard collapse won't engage LM
+        // (rewriter short-circuits) — guard anyway by gating on grandchildren.
+        if (!grandchildren.isEmpty()) {
+            childStage.setInputSinkDecorator(
+                (sink, allocator) -> new OrdinalAppendingSink(sink, allocator, OpenSearchLateMaterialization.UGSI_FIELD)
+            );
+        }
+        parentChildStages.add(childStage);
 
         // Replace the wrapper's input with a StageInputScan placeholder. The wrapper itself
         // stays in the parent fragment to mark the Scatter-Gather stage.

@@ -8,12 +8,15 @@
 
 package org.opensearch.analytics.exec.stage;
 
+import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.analytics.backend.ExchangeSource;
 import org.opensearch.analytics.exec.AnalyticsSearchTransportService;
 import org.opensearch.analytics.exec.QueryContext;
 import org.opensearch.analytics.exec.RowProducingSink;
+import org.opensearch.analytics.exec.stage.coordinator.LocalStageTask;
+import org.opensearch.analytics.exec.stage.coordinator.LocalTaskRunner;
 import org.opensearch.analytics.exec.stage.coordinator.ReduceStageExecution;
 import org.opensearch.analytics.exec.stage.shard.ShardFragmentStageExecution;
 import org.opensearch.analytics.planner.RelNodeUtils;
@@ -22,6 +25,7 @@ import org.opensearch.analytics.planner.rel.OpenSearchLateMaterialization;
 import org.opensearch.analytics.spi.DataConsumer;
 import org.opensearch.analytics.spi.ExchangeSink;
 import org.opensearch.cluster.service.ClusterService;
+import org.opensearch.core.action.ActionListener;
 
 import java.util.List;
 
@@ -163,18 +167,33 @@ public final class LateMaterializationStageExecution extends AbstractStageExecut
     /** Wrapper RelNode pulled from the stage's fragment — carries fetchList + fetchListStorage. */
     private final OpenSearchLateMaterialization wrapper;
 
+    /**
+     * Stage id of the SHARD_FRAGMENT descendant whose resolved targets feed our fetch
+     * dispatch. Walked once at construction; used in Phase C to look up
+     * {@code config.getResolvedTargets(shardStageId)}.
+     *
+     * <p>HACK: this id is paired with the side-table on {@link QueryContext} to map
+     * {@code ___ugsi → (DiscoveryNode, ShardId)}. See {@code QueryContext.resolvedTargetsByStage}
+     * for the rationale and revisit conditions — short version: stages leaving
+     * lookup state for other stages is a placeholder seam, not the long-term shape.
+     */
+    private final int shardStageId;
+
     public LateMaterializationStageExecution(
         Stage stage,
         QueryContext config,
         ExchangeSink parentSink,
         ClusterService clusterService,
-        AnalyticsSearchTransportService transport
+        AnalyticsSearchTransportService transport,
+        int shardStageId
     ) {
         super(stage, config.queryId(), config.operationListeners(), config.parentTask());
         this.config = config;
         this.parentSink = parentSink;
         this.clusterService = clusterService;
         this.transport = transport;
+        this.shardStageId = shardStageId;
+        this.runner = new LocalTaskRunner(config.localTaskExecutor());
         this.wrapper = RelNodeUtils.findNode(stage.getFragment(), OpenSearchLateMaterialization.class);
         if (this.wrapper == null) {
             throw new IllegalStateException(
@@ -213,15 +232,43 @@ public final class LateMaterializationStageExecution extends AbstractStageExecut
     }
 
     /**
-     * Skeleton: returns an empty task list so the base template auto-transitions to SUCCEEDED.
-     * QTF Phases A-D will replace this with real tasks that drain {@link #childInputBuffer},
-     * scatter-fetch by {@code ___ugsi}, gather, and stitch into {@link #parentSink}.
+     * Wiring-only skeleton: drains the child input, logs row count + first batch's schema
+     * (asserts the producer-side {@code ___ugsi} append + planner-declared {@code ___row_id}
+     * arrived), closes the parent sink without feeding, transitions SUCCEEDED.
      *
-     * <p>The empty-task short-circuit means a real QTF query routed through this stage today
-     * produces no rows upstream — wiring is exercised, semantics are not.
+     * <p>Will be replaced by the real drain → groupByUgsi → scatterFetch → gather → stitch
+     * pipeline. Today: wiring exercised, no rows produced upstream.
      */
     @Override
     protected List<StageTask> materializeTasks() {
-        return List.of();
+        return List.of(new LocalStageTask(new StageTaskId(getStageId(), 0), this::drainAndClose));
+    }
+
+    private void drainAndClose(ActionListener<Void> listener) {
+        try {
+            int batchCount = 0;
+            long rowCount = 0;
+            String firstSchema = null;
+            for (VectorSchemaRoot vsr : childInputBuffer.readResult()) {
+                if (firstSchema == null) {
+                    firstSchema = vsr.getSchema().toString();
+                }
+                rowCount += vsr.getRowCount();
+                batchCount++;
+            }
+            // TODO: [RemoveBeforeMerge] downgrade to debug or remove before PR — info-level
+            // batch/schema dump is for wiring validation during the QTF bring-up.
+            logger.info(
+                "[LMStage] drained stageId={} batches={} rows={} firstSchema={}",
+                getStageId(),
+                batchCount,
+                rowCount,
+                firstSchema
+            );
+            parentSink.close();
+            listener.onResponse(null);
+        } catch (Exception e) {
+            listener.onFailure(e);
+        }
     }
 }

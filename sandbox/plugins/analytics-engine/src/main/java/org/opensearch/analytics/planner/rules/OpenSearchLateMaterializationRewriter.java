@@ -103,6 +103,7 @@ public final class OpenSearchLateMaterializationRewriter {
 
     private OpenSearchLateMaterializationRewriter() {}
 
+    // TODO : Reject QTF if there are no Exchanges
     /** Returns the rewritten root iff QTF matched and fired; {@link Optional#empty()} otherwise. */
     public static Optional<RelNode> rewrite(RelNode root) {
         AnchorContext ctx = findAnchor(root);

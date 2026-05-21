@@ -8,12 +8,14 @@
 
 package org.opensearch.analytics.exec.stage.coordinator;
 
+import org.apache.arrow.memory.BufferAllocator;
 import org.opensearch.analytics.backend.ExchangeSource;
 import org.opensearch.analytics.exec.QueryContext;
 import org.opensearch.analytics.exec.stage.AbstractStageExecution;
 import org.opensearch.analytics.exec.stage.SinkProvidingStageExecution;
 import org.opensearch.analytics.exec.stage.StageTask;
 import org.opensearch.analytics.exec.stage.StageTaskId;
+import org.opensearch.analytics.planner.dag.InputSinkDecorator;
 import org.opensearch.analytics.planner.dag.Stage;
 import org.opensearch.analytics.spi.ExchangeSink;
 import org.opensearch.analytics.spi.MultiInputExchangeSink;
@@ -33,11 +35,13 @@ public final class ReduceStageExecution extends AbstractStageExecution implement
 
     private final ReducingExchangeSink backendSink;
     private final ExchangeSink downstream;
+    private final BufferAllocator allocator;
 
     public ReduceStageExecution(Stage stage, QueryContext config, ReducingExchangeSink backendSink, ExchangeSink downstream) {
         super(stage, config.queryId(), config.operationListeners(), config.parentTask());
         this.backendSink = backendSink;
         this.downstream = downstream;
+        this.allocator = config.bufferAllocator();
         this.runner = new LocalTaskRunner(config.localTaskExecutor());
     }
 
@@ -55,10 +59,20 @@ public final class ReduceStageExecution extends AbstractStageExecution implement
 
     @Override
     public ExchangeSink inputSink(int childStageId) {
+        InputSinkDecorator decorator = stage.getInputSinkDecorator();
         if (backendSink instanceof MultiInputExchangeSink multi) {
+            // Decorating per-child sub-sinks of a multi-input reducer is not supported.
+            // The QTF DAG cut (only producer of decorators today) doesn't fire on
+            // multi-input shapes, so this combination is unreachable in practice — the
+            // throw is a safety net guarding against future drift.
+            if (decorator != null) {
+                throw new IllegalStateException(
+                    "InputSinkDecorator on a multi-input reducer (stageId=" + getStageId() + ") is not supported"
+                );
+            }
             return multi.sinkForChild(childStageId);
         }
-        return backendSink;
+        return decorator != null ? decorator.decorate(backendSink, allocator) : backendSink;
     }
 
     @Override

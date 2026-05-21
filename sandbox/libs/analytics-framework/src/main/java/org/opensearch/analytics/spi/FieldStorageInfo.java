@@ -28,6 +28,7 @@ public class FieldStorageInfo {
     private final List<String> indexFormats;
     private final List<String> storedFieldFormats;
     private final boolean derived;
+    private final List<String> dependsOnPhysicalCols;
 
     public FieldStorageInfo(
         String fieldName,
@@ -38,6 +39,21 @@ public class FieldStorageInfo {
         List<String> storedFieldFormats,
         boolean derived
     ) {
+        // Physical col is its own physical dependency; derived defaults to no deps until a
+        // caller (e.g. Project / Aggregate FSI computation) supplies them via the 8-arg ctor.
+        this(fieldName, mappingType, fieldType, docValueFormats, indexFormats, storedFieldFormats, derived, derived ? List.of() : List.of(fieldName));
+    }
+
+    public FieldStorageInfo(
+        String fieldName,
+        String mappingType,
+        FieldType fieldType,
+        List<String> docValueFormats,
+        List<String> indexFormats,
+        List<String> storedFieldFormats,
+        boolean derived,
+        List<String> dependsOnPhysicalCols
+    ) {
         this.fieldName = fieldName;
         this.mappingType = mappingType;
         this.fieldType = fieldType;
@@ -45,11 +61,19 @@ public class FieldStorageInfo {
         this.indexFormats = indexFormats;
         this.storedFieldFormats = storedFieldFormats;
         this.derived = derived;
+        this.dependsOnPhysicalCols = dependsOnPhysicalCols;
     }
 
-    /** Creates a derived column (agg result, expression) with no physical storage.
-     *  FieldType inferred from SqlTypeName. */
+    /** Creates a derived column (agg result, expression) with no physical storage and no deps.
+     *  FieldType inferred from SqlTypeName. Use {@link #derivedColumn(String, SqlTypeName, List)}
+     *  when the caller can supply the underlying physical-column dependencies. */
     public static FieldStorageInfo derivedColumn(String fieldName, SqlTypeName sqlTypeName) {
+        return derivedColumn(fieldName, sqlTypeName, List.of());
+    }
+
+    /** Creates a derived column with explicit physical-column dependencies — the set of
+     *  TableScan-level fields whose values flow into this column's computation. */
+    public static FieldStorageInfo derivedColumn(String fieldName, SqlTypeName sqlTypeName, List<String> dependsOnPhysicalCols) {
         return new FieldStorageInfo(
             fieldName,
             sqlTypeName.getName(),
@@ -57,7 +81,8 @@ public class FieldStorageInfo {
             List.of(),
             List.of(),
             List.of(),
-            true
+            true,
+            dependsOnPhysicalCols
         );
     }
 
@@ -86,6 +111,27 @@ public class FieldStorageInfo {
     /** True for computed columns (agg results, expressions) with no physical storage. */
     public boolean isDerived() {
         return derived;
+    }
+
+    /**
+     * Names of the TableScan-level (physical) columns whose values flow into this column's
+     * computation. For physical columns this is a singleton {@code [fieldName]}; for derived
+     * columns it is the union of underlying physical cols across the expression / agg-call
+     * tree. {@code COUNT(*)} and pure-literal projects produce an empty list — no physical
+     * dependency.
+     *
+     * <p>Used by the QTF rewriter to derive the fetch list off the topmost operator's FSI
+     * without re-walking RexNodes from scratch.
+     *
+     * <p>TODO: today we use string field names because they stay stable across narrowed-scan
+     * rewrites and (future) Join/Union plans where int ordinals across multiple TableScans
+     * become ambiguous. For very large plans the per-FSI string list can become a memory
+     * hotspot — consider switching to int ordinals (rooted to the originating TableScan's
+     * rowType) when single-scan throughput dominates and stability across rewrites can be
+     * traded off.
+     */
+    public List<String> getDependsOnPhysicalCols() {
+        return dependsOnPhysicalCols;
     }
 
     /**

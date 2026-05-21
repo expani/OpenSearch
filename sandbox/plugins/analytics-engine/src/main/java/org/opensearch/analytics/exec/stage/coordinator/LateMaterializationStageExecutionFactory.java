@@ -47,6 +47,32 @@ public final class LateMaterializationStageExecutionFactory implements StageExec
         // RelNodeUtils.findNode(fragment, OpenSearchLateMaterialization.class) and reads
         // fetchList + fetchListStorage off it. Keep wrapper-extraction out of the factory
         // so the execution class is self-contained for unit testing.
-        return new LateMaterializationStageExecution(stage, config, sink, clusterService, transport);
+        int shardStageId = findShardFragmentDescendantId(stage);
+        return new LateMaterializationStageExecution(stage, config, sink, clusterService, transport, shardStageId);
+    }
+
+    /**
+     * Walks down the DAG from the LM stage to find the SHARD_FRAGMENT descendant.
+     * In the typical QTF shape (Shard Scan → Sort+Limit Reduce → LM) the path is two
+     * hops; we DFS just in case future shapes add intermediate stages.
+     *
+     * <p>HACK: this id is paired with the side-table on {@link QueryContext} to map
+     * {@code ___ugsi → (DiscoveryNode, ShardId)} during Phase C. See
+     * {@code QueryContext.resolvedTargetsByStage} for revisit conditions.
+     */
+    private static int findShardFragmentDescendantId(Stage stage) {
+        for (Stage child : stage.getChildStages()) {
+            if (child.getExecutionType() == StageExecutionType.SHARD_FRAGMENT) {
+                return child.getStageId();
+            }
+            for (Stage grandChild : child.getChildStages()) {
+                if (grandChild.getExecutionType() == StageExecutionType.SHARD_FRAGMENT) {
+                    return grandChild.getStageId();
+                }
+            }
+        }
+        throw new IllegalStateException(
+            "LATE_MATERIALIZATION stage " + stage.getStageId() + " has no SHARD_FRAGMENT descendant — DAGBuilder bug"
+        );
     }
 }
