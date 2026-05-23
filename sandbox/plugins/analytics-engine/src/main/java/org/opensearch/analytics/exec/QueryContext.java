@@ -62,7 +62,7 @@ public class QueryContext {
      * <p>Single-threaded write inside one stage's {@code materializeTasks}; reads happen
      * only after that stage SUCCEEDED → plain {@link HashMap} suffices.
      */
-    private final Map<Integer, List<ShardExecutionTarget>> resolvedTargetsByStage = new HashMap<>();
+    private final Map<Integer, Map<Integer, ShardExecutionTarget>> resolvedTargetsByStage = new HashMap<>();
 
     public QueryContext(QueryDAG dag, Executor searchExecutor, AnalyticsQueryTask parentTask, ArrowAllocatorService allocatorService) {
         this(
@@ -127,14 +127,19 @@ public class QueryContext {
      * {@code QueryContext}.
      */
     public void recordResolvedTargets(int stageId, List<ShardExecutionTarget> targets) {
-        resolvedTargetsByStage.put(stageId, targets);
+        Map<Integer, ShardExecutionTarget> byOrdinal = new HashMap<>(targets.size());
+        for (ShardExecutionTarget t : targets) {
+            byOrdinal.put(t.ordinal(), t);
+        }
+        resolvedTargetsByStage.put(stageId, byOrdinal);
     }
 
     /**
-     * Returns the resolved targets for a stage, or {@code null} if that stage hasn't
-     * resolved yet (or doesn't have a resolver).
+     * Returns the resolved targets for a stage keyed by per-shard ordinal (UGSI), or
+     * {@code null} if that stage hasn't resolved yet (or doesn't have a resolver). The
+     * Map is built once at record time so callers can do O(1) ordinal-to-target lookup.
      */
-    public List<ShardExecutionTarget> getResolvedTargets(int stageId) {
+    public Map<Integer, ShardExecutionTarget> getResolvedTargets(int stageId) {
         return resolvedTargetsByStage.get(stageId);
     }
 

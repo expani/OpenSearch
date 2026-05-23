@@ -10,6 +10,7 @@ package org.opensearch.analytics.spi;
 
 import org.apache.calcite.sql.type.SqlTypeName;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
@@ -28,7 +29,7 @@ public class FieldStorageInfo {
     private final List<String> indexFormats;
     private final List<String> storedFieldFormats;
     private final boolean derived;
-    private final List<String> dependsOnPhysicalCols;
+    private final LinkedHashSet<String> dependsOnPhysicalCols;
 
     public FieldStorageInfo(
         String fieldName,
@@ -39,9 +40,9 @@ public class FieldStorageInfo {
         List<String> storedFieldFormats,
         boolean derived
     ) {
-        // Physical col is its own physical dependency; derived defaults to no deps until a
-        // caller (e.g. Project / Aggregate FSI computation) supplies them via the 8-arg ctor.
-        this(fieldName, mappingType, fieldType, docValueFormats, indexFormats, storedFieldFormats, derived, derived ? List.of() : List.of(fieldName));
+        // Default: no physical-col dependencies. Physical fields aren't "derived from"
+        // anything; derived fields' deps are supplied by the caller via the 8-arg ctor.
+        this(fieldName, mappingType, fieldType, docValueFormats, indexFormats, storedFieldFormats, derived, new LinkedHashSet<>());
     }
 
     public FieldStorageInfo(
@@ -52,7 +53,7 @@ public class FieldStorageInfo {
         List<String> indexFormats,
         List<String> storedFieldFormats,
         boolean derived,
-        List<String> dependsOnPhysicalCols
+        LinkedHashSet<String> dependsOnPhysicalCols
     ) {
         this.fieldName = fieldName;
         this.mappingType = mappingType;
@@ -65,15 +66,17 @@ public class FieldStorageInfo {
     }
 
     /** Creates a derived column (agg result, expression) with no physical storage and no deps.
-     *  FieldType inferred from SqlTypeName. Use {@link #derivedColumn(String, SqlTypeName, List)}
+     *  FieldType inferred from SqlTypeName. Use {@link #derivedColumn(String, SqlTypeName, LinkedHashSet)}
      *  when the caller can supply the underlying physical-column dependencies. */
     public static FieldStorageInfo derivedColumn(String fieldName, SqlTypeName sqlTypeName) {
-        return derivedColumn(fieldName, sqlTypeName, List.of());
+        return derivedColumn(fieldName, sqlTypeName, new LinkedHashSet<>());
     }
 
-    /** Creates a derived column with explicit physical-column dependencies — the set of
-     *  TableScan-level fields whose values flow into this column's computation. */
-    public static FieldStorageInfo derivedColumn(String fieldName, SqlTypeName sqlTypeName, List<String> dependsOnPhysicalCols) {
+    /** Creates a derived column with explicit physical-column dependencies — the
+     *  TableScan-level fields whose values flow into this column's computation, in
+     *  first-appearance order. {@link LinkedHashSet} makes both the ordering invariant
+     *  and the no-duplicates invariant explicit at the type level. */
+    public static FieldStorageInfo derivedColumn(String fieldName, SqlTypeName sqlTypeName, LinkedHashSet<String> dependsOnPhysicalCols) {
         return new FieldStorageInfo(
             fieldName,
             sqlTypeName.getName(),
@@ -115,22 +118,24 @@ public class FieldStorageInfo {
 
     /**
      * Names of the TableScan-level (physical) columns whose values flow into this column's
-     * computation. For physical columns this is a singleton {@code [fieldName]}; for derived
-     * columns it is the union of underlying physical cols across the expression / agg-call
-     * tree. {@code COUNT(*)} and pure-literal projects produce an empty list — no physical
-     * dependency.
+     * computation, in first-appearance order. Empty for physical columns (they aren't
+     * "derived from" anything — their identity is their own field name) and for derived
+     * columns with no physical inputs (e.g. {@code COUNT(*)}, pure-literal projects).
+     * For other derived columns it is the union of underlying physical cols across the
+     * expression / agg-call tree.
      *
      * <p>Used by the QTF rewriter to derive the fetch list off the topmost operator's FSI
-     * without re-walking RexNodes from scratch.
+     * without re-walking RexNodes from scratch. {@link LinkedHashSet} makes both the
+     * ordering invariant and the no-duplicates invariant explicit at the type level.
      *
      * <p>TODO: today we use string field names because they stay stable across narrowed-scan
      * rewrites and (future) Join/Union plans where int ordinals across multiple TableScans
-     * become ambiguous. For very large plans the per-FSI string list can become a memory
+     * become ambiguous. For very large plans the per-FSI string set can become a memory
      * hotspot — consider switching to int ordinals (rooted to the originating TableScan's
      * rowType) when single-scan throughput dominates and stability across rewrites can be
      * traded off.
      */
-    public List<String> getDependsOnPhysicalCols() {
+    public LinkedHashSet<String> getDependsOnPhysicalCols() {
         return dependsOnPhysicalCols;
     }
 

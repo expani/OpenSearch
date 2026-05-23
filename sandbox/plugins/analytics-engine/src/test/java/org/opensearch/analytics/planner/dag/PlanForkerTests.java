@@ -138,8 +138,11 @@ public class PlanForkerTests extends BasePlannerRulesTests {
             3,
             makeSort(makeFilter(stubScan(mockTable("test_index", "status", "size")), makeEquals(0, SqlTypeName.INTEGER, 200)), 10)
         );
-        assertEquals(1, sortFilterDag.rootStage().getPlanAlternatives().size());
-        for (StagePlan plan : sortFilterDag.rootStage().getPlanAlternatives()) {
+        // QTF rewriter inserts a LATE_MATERIALIZATION root stage above the original Sort+Limit
+        // reduce stage; this test was written pre-QTF to assert on the Sort stage. Skip past LM.
+        Stage sortFilterRoot = effectiveSortRoot(sortFilterDag.rootStage());
+        assertEquals(1, sortFilterRoot.getPlanAlternatives().size());
+        for (StagePlan plan : sortFilterRoot.getPlanAlternatives()) {
             assertTrue(plan.resolvedFragment() instanceof OpenSearchSort);
         }
 
@@ -155,10 +158,19 @@ public class PlanForkerTests extends BasePlannerRulesTests {
                 10
             )
         );
-        assertEquals(1, sortAggDag.rootStage().getPlanAlternatives().size());
-        for (StagePlan plan : sortAggDag.rootStage().getPlanAlternatives()) {
+        Stage sortAggRoot = effectiveSortRoot(sortAggDag.rootStage());
+        assertEquals(1, sortAggRoot.getPlanAlternatives().size());
+        for (StagePlan plan : sortAggRoot.getPlanAlternatives()) {
             assertTrue(plan.resolvedFragment() instanceof OpenSearchSort);
         }
+    }
+
+    /** If the root is a QTF LATE_MATERIALIZATION stage, descend to its sort+limit reduce child. */
+    private static Stage effectiveSortRoot(Stage root) {
+        if (root.getExecutionType() == StageExecutionType.LATE_MATERIALIZATION) {
+            return root.getChildStages().getFirst();
+        }
+        return root;
     }
 
     /**

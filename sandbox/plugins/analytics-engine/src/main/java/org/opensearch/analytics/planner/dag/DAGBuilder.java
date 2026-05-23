@@ -141,14 +141,7 @@ public class DAGBuilder {
             List<String> reduceViable = CapabilityResolutionUtils.filterByReduceCapability(registry, lm.getViableBackends());
             childSinkProvider = registry.getBackend(reduceViable.getFirst()).getExchangeSinkProvider();
         }
-        Stage childStage = new Stage(
-            childStageId,
-            childFragment,
-            grandchildren,
-            /*exchangeInfo=*/ null,
-            childSinkProvider,
-            targetResolver
-        );
+        Stage childStage = new Stage(childStageId, childFragment, grandchildren, /*exchangeInfo=*/ null, childSinkProvider, targetResolver);
         // Multi-shard QTF: the child reducer feeds the LM stage. Stamp every
         // shard's batches with their target.ordinal() as ___ugsi BEFORE the
         // backend's reduce sees them, so the LM stage can group rows by source
@@ -163,19 +156,21 @@ public class DAGBuilder {
 
         // Replace the wrapper's input with a StageInputScan placeholder. The wrapper itself
         // stays in the parent fragment to mark the Scatter-Gather stage.
+        OpenSearchRelNode lmInput = (OpenSearchRelNode) lm.getInput();
         OpenSearchStageInputScan stageInput = new OpenSearchStageInputScan(
             lm.getCluster(),
             lm.getTraitSet(),
             childStageId,
             lm.getInput().getRowType(),
-            lm.getViableBackends()
+            lm.getViableBackends(),
+            lmInput.getOutputFieldStorage()
         );
         return new OpenSearchLateMaterialization(
             lm.getCluster(),
             lm.getTraitSet(),
             stageInput,
-            lm.getFetchList(),
-            lm.getFetchListStorage(),
+            lm.getAboveAnchorPhysicalFields(),
+            lm.getAboveAnchorPhysicalFieldStorage(),
             lm.getViableBackends()
         );
     }
@@ -212,12 +207,14 @@ public class DAGBuilder {
         // Replace the reducer's input with a StageInputScan placeholder.
         // The root fragment ends at the reducer; the child stage fragment starts below it.
         // StageInputScan signals where the Scheduler feeds Arrow batches from the child stage.
+        OpenSearchRelNode reducerInput = (OpenSearchRelNode) reducer.getInput();
         OpenSearchStageInputScan stageInput = new OpenSearchStageInputScan(
             reducer.getCluster(),
             reducer.getTraitSet(),
             childStageId,
             reducer.getInput().getRowType(),
-            reducer.getViableBackends()
+            reducer.getViableBackends(),
+            reducerInput.getOutputFieldStorage()
         );
         return new OpenSearchExchangeReducer(
             reducer.getCluster(),

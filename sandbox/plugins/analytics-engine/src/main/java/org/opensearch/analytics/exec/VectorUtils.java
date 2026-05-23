@@ -54,12 +54,7 @@ public final class VectorUtils {
      * @param allocator allocator for the new {@link IntVector}
      * @return new VSR with the appended column; row count and existing column data unchanged
      */
-    public static VectorSchemaRoot appendConstantInt(
-        VectorSchemaRoot input,
-        String name,
-        int value,
-        BufferAllocator allocator
-    ) {
+    public static VectorSchemaRoot appendConstantInt(VectorSchemaRoot input, String name, int value, BufferAllocator allocator) {
         int rowCount = input.getRowCount();
 
         IntVector constantVector = new IntVector(name, allocator);
