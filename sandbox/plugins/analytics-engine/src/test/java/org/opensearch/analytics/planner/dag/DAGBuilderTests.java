@@ -160,9 +160,8 @@ public class DAGBuilderTests extends BasePlannerRulesTests {
 
     /**
      * Drives SQL through the full planner so the QTF rewriter fires, then runs the result
-     * through {@link DAGBuilder}. Returns the DAG with three stages for the typical QTF shape:
-     * Stage 0 = SHARD_FRAGMENT (Scan), Stage 1 = COORDINATOR_REDUCE (Sort+Limit), Stage 2 =
-     * LATE_MATERIALIZATION (root).
+     * through {@link DAGBuilder}. Returns the four-stage DAG documented at
+     * {@link #testQtfDag_multiShardFourStages}.
      */
     private QueryDAG buildQtfDag(String sql, int shardCount) {
         ClusterState state = SqlPlannerTestFixture.clusterStateWith(ClickBench.INDEX, ClickBench.BASIC_FIELDS, "parquet", shardCount);
@@ -173,37 +172,87 @@ public class DAGBuilderTests extends BasePlannerRulesTests {
         );
         RelNode parsed = SqlPlannerTestFixture.parseSql(sql, state);
         RelNode cbo = PlannerImpl.runAllOptimizations(parsed, context);
-        return DAGBuilder.build(cbo, context.getCapabilityRegistry(), mockClusterService());
+        QueryDAG dag = DAGBuilder.build(cbo, context.getCapabilityRegistry(), mockClusterService());
+        LOGGER.info("QTF QueryDAG:\n{}", dag);
+        return dag;
     }
 
     /**
-     * Multi-shard QTF produces three stages: Shard Scan → Sort+Limit Reduce → LM Scatter-Gather.
-     * The LM stage is the root — outer Project (when present) sits inside the LM stage's
-     * fragment alongside the wrapper. Stage type detection finds {@code OpenSearchLateMaterialization}
-     * via tree walk, not strict instanceof on the fragment root.
+     * Multi-shard QTF produces four stages, dataflow runs bottom-up from shards to the post-LM
+     * coordinator reduce:
+     * <pre>
+     *   Stage 0 SHARD_FRAGMENT       (Filter? + Scan)
+     *     ↓
+     *   Stage 1 COORDINATOR_REDUCE   (Sort+Limit over reduce-set, ___row_id, ___ugsi)
+     *     ↓   inputSinkDecorator = OrdinalAppendingSink (stamps shard ordinal as ___ugsi)
+     *   Stage 2 LATE_MATERIALIZATION (wrapper rooted at StageInputScan(stage 1))
+     *     ↓
+     *   Stage 3 COORDINATOR_REDUCE   (post-LM ops: outer Project, etc.)  ← root
+     * </pre>
+     *
+     * <p>Stage 3 is the post-LM compute stage, separated by {@link DAGBuilder} so the LM stage
+     * itself stays a pure scatter/gather/stitch and the post-LM Project (or any future
+     * Filter/Aggregate/Sort) runs on Substrait via the standard reduce path.
      */
-    public void testQtfDag_multiShardThreeStages() {
+    public void testQtfDag_multiShardFourStages() {
         QueryDAG dag = buildQtfDag("SELECT URL, EventDate FROM hits ORDER BY EventDate LIMIT 10", 2);
         assertBottomUpIds(dag.rootStage());
 
-        Stage root = dag.rootStage();
-        assertEquals(StageExecutionType.LATE_MATERIALIZATION, root.getExecutionType());
-        assertNotNull(
-            "root fragment must contain OpenSearchLateMaterialization wrapper",
-            RelNodeUtils.findNode(root.getFragment(), OpenSearchLateMaterialization.class)
-        );
-        assertEquals(1, root.getChildStages().size());
+        Stage postLm = dag.rootStage();
+        assertEquals(StageExecutionType.COORDINATOR_REDUCE, postLm.getExecutionType());
+        assertNull("post-LM reduce carries no input decorator", postLm.getInputSinkDecorator());
+        assertEquals(1, postLm.getChildStages().size());
 
-        Stage reduce = root.getChildStages().get(0);
+        Stage lm = postLm.getChildStages().get(0);
+        assertEquals(StageExecutionType.LATE_MATERIALIZATION, lm.getExecutionType());
+        assertNotNull(
+            "LM fragment must contain OpenSearchLateMaterialization wrapper",
+            RelNodeUtils.findNode(lm.getFragment(), OpenSearchLateMaterialization.class)
+        );
+        assertEquals(1, lm.getChildStages().size());
+
+        Stage reduce = lm.getChildStages().get(0);
         assertEquals(StageExecutionType.COORDINATOR_REDUCE, reduce.getExecutionType());
         assertNotNull("LM cut must install OrdinalAppendingSink decorator on reducer", reduce.getInputSinkDecorator());
         assertEquals(1, reduce.getChildStages().size());
+
+        // StageInputScan must carry ___ugsi — cutAtExchange uses the reducer's output rowType.
+        OpenSearchStageInputScan reduceInputScan = RelNodeUtils.findNode(reduce.getFragment(), OpenSearchStageInputScan.class);
+        assertNotNull(reduceInputScan);
+        assertEquals(0, reduceInputScan.getChildStageId());
+        assertTrue(
+            "StageInputScan rowType must include " + OpenSearchLateMaterialization.UGSI_FIELD,
+            reduceInputScan.getRowType().getFieldNames().contains(OpenSearchLateMaterialization.UGSI_FIELD)
+        );
 
         Stage scan = reduce.getChildStages().get(0);
         assertEquals(StageExecutionType.SHARD_FRAGMENT, scan.getExecutionType());
         assertNull("scan stage carries no input decorator", scan.getInputSinkDecorator());
         assertNotNull("scan stage must have a target resolver", scan.getTargetResolver());
         assertEquals(0, scan.getChildStages().size());
+    }
+
+    /**
+     * Stage 0's shard fragment must propagate {@code __row_id__} on its Scan output. The
+     * rewriter narrows the Scan to {@code [belowAnchorPhysicalFields..., __row_id__]} via an
+     * override rowType; this asserts that override survives DAG cuts so the converted
+     * Substrait declares the helper column. Without it, Stage 1's reduce plan references
+     * {@code input-0.__row_id__} but the partition exposes only the physical cols and
+     * DataFusion fails the registration with "No field named __row_id__".
+     */
+    public void testQtfDag_stage0ScanCarriesRowIdHelper() {
+        QueryDAG dag = buildQtfDag("SELECT URL, EventDate FROM hits ORDER BY EventDate LIMIT 10", 2);
+        Stage scan = dag.rootStage().getChildStages().getFirst().getChildStages().getFirst().getChildStages().getFirst();
+        assertEquals(StageExecutionType.SHARD_FRAGMENT, scan.getExecutionType());
+
+        OpenSearchTableScan tableScan = RelNodeUtils.findNode(scan.getFragment(), OpenSearchTableScan.class);
+        assertNotNull("Stage 0 fragment must contain an OpenSearchTableScan", tableScan);
+
+        List<String> scanFieldNames = tableScan.getRowType().getFieldNames();
+        assertTrue(
+            "Stage 0 Scan rowType must carry " + OpenSearchLateMaterialization.ROW_ID_FIELD + ", got " + scanFieldNames,
+            scanFieldNames.contains(OpenSearchLateMaterialization.ROW_ID_FIELD)
+        );
     }
 
     /**

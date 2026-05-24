@@ -9,8 +9,14 @@
 package org.opensearch.analytics.exec;
 
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.IntVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Utilities for Arrow {@link VectorSchemaRoot} manipulation in the analytics engine.
@@ -18,6 +24,8 @@ import org.apache.arrow.vector.VectorSchemaRoot;
  * @opensearch.internal
  */
 public final class VectorUtils {
+
+    private static final Logger LOGGER = LogManager.getLogger(VectorUtils.class);
 
     private VectorUtils() {}
 
@@ -45,8 +53,10 @@ public final class VectorUtils {
      * VSR independently — closing the returned VSR releases both the new column and
      * the shared columns.
      *
-     * <p>Uses Arrow's {@link VectorSchemaRoot#addVector(int, org.apache.arrow.vector.FieldVector)}
-     * which is the blessed pattern for non-mutating column extension.
+     * <p>Implementation: builds a new VSR from the existing FieldVector references plus the
+     * constant column. We avoid {@code VectorSchemaRoot.addVector} because Arrow 18.x's
+     * precondition rejects appending at index == size (only insert before an existing column
+     * is allowed); the Iterable constructor accepts the appended layout directly.
      *
      * @param input     source batch; not closed by this method
      * @param name      name of the new column
@@ -56,7 +66,17 @@ public final class VectorUtils {
      */
     public static VectorSchemaRoot appendConstantInt(VectorSchemaRoot input, String name, int value, BufferAllocator allocator) {
         int rowCount = input.getRowCount();
+        // FIXME [RemoveBeforeMainMerge] diagnostics for QTF VSR.addVector failure
+        LOGGER.info(
+            "FIXME [RemoveBeforeMainMerge] appendConstantInt: name={} value={} rowCount={} fieldVectorsSize={} schema={}",
+            name,
+            value,
+            rowCount,
+            input.getFieldVectors().size(),
+            input.getSchema()
+        );
 
+        // TODO/FIXME: reserve `rowCount * 4` bytes against the query CircuitBreaker before allocateNew.
         IntVector constantVector = new IntVector(name, allocator);
         constantVector.allocateNew(rowCount);
         for (int i = 0; i < rowCount; i++) {
@@ -64,6 +84,10 @@ public final class VectorUtils {
         }
         constantVector.setValueCount(rowCount);
 
-        return input.addVector(input.getFieldVectors().size(), constantVector);
+        // Zero-copy: existing FieldVectors are reused by reference; only the new column allocates.
+        List<FieldVector> combined = new ArrayList<>(input.getFieldVectors().size() + 1);
+        combined.addAll(input.getFieldVectors());
+        combined.add(constantVector);
+        return new VectorSchemaRoot(combined);
     }
 }

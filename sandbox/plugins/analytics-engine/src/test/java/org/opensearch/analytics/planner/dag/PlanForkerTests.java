@@ -165,12 +165,19 @@ public class PlanForkerTests extends BasePlannerRulesTests {
         }
     }
 
-    /** If the root is a QTF LATE_MATERIALIZATION stage, descend to its sort+limit reduce child. */
+    /**
+     * QTF wraps the original sort+limit reduce inside a 4-stage spine: post-LM COORDINATOR_REDUCE
+     * (root) → LATE_MATERIALIZATION → sort+limit COORDINATOR_REDUCE → SHARD_FRAGMENT. Descend
+     * down the first-child chain until we hit the stage whose fragment is the OpenSearchSort the
+     * pre-QTF assertions expect.
+     */
     private static Stage effectiveSortRoot(Stage root) {
-        if (root.getExecutionType() == StageExecutionType.LATE_MATERIALIZATION) {
-            return root.getChildStages().getFirst();
+        Stage stage = root;
+        while (!(stage.getFragment() instanceof OpenSearchSort)) {
+            if (stage.getChildStages().isEmpty()) return stage;
+            stage = stage.getChildStages().getFirst();
         }
-        return root;
+        return stage;
     }
 
     /**

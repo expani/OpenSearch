@@ -44,6 +44,16 @@ import java.util.Set;
  * multiple input branches) are not handled here and the single-input {@code SingleRel}
  * shape will need to grow.
  *
+ * <p>TODO: this wrapper is effectively an exchange (data crosses node boundaries via
+ * scatter-gather fetch), but it isn't introduced by CBO trait propagation like
+ * {@code OpenSearchExchangeReducer} — the QTF rewriter inserts it as a post-CBO HEP
+ * pass, so its child stage receives a stitched VSR with no Substrait {@code ExchangeRel}
+ * representing the boundary. As a consequence, post-LM stages need a special
+ * {@code allChildrenAreStageInputScan} branch in {@link
+ * org.opensearch.analytics.planner.dag.FragmentConversionDriver}. Revisit whether QTF
+ * detection can be modeled as a custom distribution trait so CBO inserts the LM node
+ * the same way it inserts gather Reducers, removing the special-case in conversion.
+ *
  * @opensearch.internal
  */
 public class OpenSearchLateMaterialization extends SingleRel implements OpenSearchRelNode {

@@ -9,6 +9,7 @@
 package org.opensearch.analytics.planner;
 
 import org.apache.arrow.vector.types.FloatingPointPrecision;
+import org.apache.arrow.vector.types.TimeUnit;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
@@ -19,6 +20,12 @@ import org.apache.calcite.sql.type.SqlTypeName;
  * This is the sole authority for type reconciliation between the
  * {@code AggregateFunction.intermediateFields} Arrow types and
  * Calcite's {@code RelDataType} system in the decomposition resolver.
+ *
+ * <p>FIXME [FixBeforeMainMerge] coverage gaps: TIMESTAMP currently hardcodes MILLISECOND
+ * (Calcite precision is ignored — see toArrow note), and several Calcite/Arrow types are
+ * still unmapped (TIMESTAMP_WITH_LOCAL_TIME_ZONE, DATE, TIME, SMALLINT, TINYINT, DECIMAL,
+ * Arrow Date/Time/Decimal/...). Audit and broaden before merge so the QTF path tolerates
+ * non-keyword/non-date columns end-to-end.
  */
 public final class ArrowCalciteTypes {
 
@@ -34,6 +41,7 @@ public final class ArrowCalciteTypes {
             case ArrowType.FloatingPoint fp when fp.getPrecision() == FloatingPointPrecision.DOUBLE -> f.createSqlType(SqlTypeName.DOUBLE);
             case ArrowType.FloatingPoint fp when fp.getPrecision() == FloatingPointPrecision.SINGLE -> f.createSqlType(SqlTypeName.REAL);
             case ArrowType.Utf8 u -> f.createSqlType(SqlTypeName.VARCHAR, Integer.MAX_VALUE);
+            case ArrowType.Utf8View v -> f.createSqlType(SqlTypeName.VARCHAR, Integer.MAX_VALUE);
             case ArrowType.Binary b -> f.createSqlType(SqlTypeName.VARBINARY, Integer.MAX_VALUE);
             case ArrowType.Bool b -> f.createSqlType(SqlTypeName.BOOLEAN);
             default -> throw new IllegalArgumentException("Unsupported Arrow type: " + t);
@@ -49,9 +57,18 @@ public final class ArrowCalciteTypes {
             case INTEGER -> new ArrowType.Int(32, true);
             case DOUBLE -> new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE);
             case REAL, FLOAT -> new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE);
-            case VARCHAR, CHAR -> ArrowType.Utf8.INSTANCE;
+            // Utf8View matches what the DataFusion/parquet path on the data node emits for
+            // string columns; switching here keeps the coordinator-side Stitcher's pre-allocated
+            // output type aligned so copyFromSafe doesn't trip on a VARCHAR/VIEWVARCHAR mismatch.
+            case VARCHAR, CHAR -> ArrowType.Utf8View.INSTANCE;
             case VARBINARY, BINARY -> ArrowType.Binary.INSTANCE;
             case BOOLEAN -> ArrowType.Bool.INSTANCE;
+            // TODO: TIMESTAMP_WITH_LOCAL_TIME_ZONE, DATE, TIME, SMALLINT, TINYINT, DECIMAL still missing.
+            // TODO: hardcoded MILLISECOND to match what DateParquetField emits on the data node;
+            // Calcite's reported precision doesn't track the wire-level Arrow precision today, so
+            // honouring t.getPrecision() here would break Stitcher copyFromSafe. Revisit when
+            // Calcite types carry the data-node-side Arrow precision faithfully.
+            case TIMESTAMP -> new ArrowType.Timestamp(TimeUnit.MILLISECOND, null);
             default -> throw new IllegalArgumentException("Unsupported Calcite type: " + t.getSqlTypeName());
         };
     }

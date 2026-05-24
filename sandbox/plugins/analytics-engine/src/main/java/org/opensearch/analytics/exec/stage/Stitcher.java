@@ -28,6 +28,19 @@ import java.util.concurrent.atomic.AtomicInteger;
  * into it. Per-shard listeners pass the position-array slice corresponding to each batch;
  * the stitcher copies each response row to the output via {@link FieldVector#copyFromSafe}.
  *
+ * <p>TODO incremental emission. Today the entire stitched VSR is emitted in a single
+ * {@code parentSink.feed} call after every shard's stream terminates — the post-LM stage
+ * (Stage 3) cannot start until LM's terminal SUCCEEDED transition. This forces Stage 3 to
+ * use the buffered MemTable sink. To enable streaming Stage 3 (which would let Camp-A
+ * post-LM ops — Filter / Project / hash Aggregate — process rows as they arrive), the
+ * stitcher would need to emit per-shard sub-batches at each shard's completion rather
+ * than holding everything in {@code output} until the end. The natural emission unit is
+ * "rows whose entire shard response has arrived" — those land at non-contiguous positions
+ * across the K-row range, so the wire-side position-sortedness invariant would have to be
+ * dropped (downstream sees rows in shard-completion order, not sort order). Camp-B post-LM
+ * ops (Sort / TopN / global-frame Aggregate) need the full set anyway and would still buffer.
+ * Defer until a real workload demands it.
+ *
  * <p>Position is derived from the order contract with the data node:
  * {@code AnalyticsSearchService.executeFetchByRowIds} requires ascending {@code rowIds} in
  * the request and the native side returns rows in the same ascending order, so the
@@ -122,7 +135,34 @@ public final class Stitcher {
                 }
                 FieldVector srcVec = (FieldVector) batch.getVector(srcCol);
                 FieldVector dstVec = output.getVector(outCol);
-                dstVec.copyFromSafe(srcRow, dstRow, srcVec);
+                // FIXME [RemoveBeforeMainMerge] diagnostics for Stitcher copyFromSafe — log every
+                // column on the first row of the first batch so we see all type pairings.
+                if (srcRow == 0 && rowsCopiedSoFar == 0) {
+                    logger.info(
+                        "FIXME [RemoveBeforeMainMerge] Stitcher col {}: src(name={}, minorType={}, type={}) → dst(name={}, minorType={}, type={})",
+                        outCol,
+                        srcVec.getName(),
+                        srcVec.getMinorType(),
+                        srcVec.getField().getType(),
+                        dstVec.getName(),
+                        dstVec.getMinorType(),
+                        dstVec.getField().getType()
+                    );
+                }
+                try {
+                    dstVec.copyFromSafe(srcRow, dstRow, srcVec);
+                } catch (RuntimeException e) {
+                    logger.error(
+                        "FIXME [RemoveBeforeMainMerge] copyFromSafe FAILED at col {}: src(minorType={}, type={}) → dst(minorType={}, type={})",
+                        outCol,
+                        srcVec.getMinorType(),
+                        srcVec.getField().getType(),
+                        dstVec.getMinorType(),
+                        dstVec.getField().getType(),
+                        e
+                    );
+                    throw e;
+                }
                 outCol++;
             }
         }
@@ -155,6 +195,11 @@ public final class Stitcher {
         try {
             if (failures.isEmpty()) {
                 output.setRowCount(totalRows);
+                // FIXME [FixBeforeMainMerge] Arrow leak: the per-query allocator reports 256 bytes
+                // leaked at QueryContext.close after a successful run. Likely the output VSR's
+                // ownership transfer to parentSink.feed leaves a buffer un-closed somewhere down
+                // the parent's drain path. Reproduce, trace allocator ownership, and ensure every
+                // FieldVector reaches close().
                 parentSink.feed(output);
                 parentSink.close();
                 logger.debug("[Stitcher] emitted rows={}", totalRows);

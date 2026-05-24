@@ -32,7 +32,8 @@ import java.util.List;
  * the structural post-conditions QTF must produce:
  * <ul>
  *   <li>Scan rowType narrowed to {@code BelowAnchorPhysicalFields + ___row_id}.</li>
- *   <li>ER output declares {@code ___ugsi} as the last field (or no ER for single-shard).</li>
+ *   <li>ER output declares {@code ___ugsi} as the last field. Single-shard plans do not trigger
+ *       QTF (no gather to skip).</li>
  *   <li>Wrapper output rowType = {@code AboveAnchorPhysicalFields}, in
  *       {@code TopmostOperatorAboveAnchor} order. Helpers stripped.</li>
  *   <li>Outer Project's RexInputRefs are remapped to wrapper-output indices.</li>
@@ -92,16 +93,12 @@ public class LateMaterializationPlanShapeTests extends BasePlannerRulesTests {
         );
     }
 
-    public void testQtfFires_singleShard() {
-        // Single shard: no ER materialized, so no ___ugsi declared. Narrowed Scan + wrapper still apply.
-        assertQtfFired(
-            "SELECT URL, EventDate FROM hits ORDER BY EventDate LIMIT 10",
-            1,
-            Expect.scanCols("EventDate"),
-            Expect.aboveAnchorPhysicalFields("URL", "EventDate"),
-            Expect.erHasUgsi(false),
-            Expect.wrapperOutput("URL", "EventDate")
-        );
+    public void testQtfDeclined_singleShard() {
+        // Single shard: CBO inserts no ExchangeReducer below the anchor (the scan's
+        // SOURCE(SINGLETON) already satisfies the parent Sort's demand). QTF's win comes from
+        // avoiding cross-node materialization of fetch-only columns through the gather; with
+        // no gather there's nothing to save, so the rewriter declines.
+        assertQtfDeclined("SELECT URL, EventDate FROM hits ORDER BY EventDate LIMIT 10", 1);
     }
 
     public void testQtfFires_descendingSort() {

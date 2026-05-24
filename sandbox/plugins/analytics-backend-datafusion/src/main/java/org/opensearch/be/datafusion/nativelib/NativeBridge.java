@@ -330,6 +330,7 @@ public final class NativeBridge {
                 ValueLayout.JAVA_LONG,
                 ValueLayout.JAVA_INT,
                 ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_BYTE,  // requestsRowIds (0/1) — QTF query phase signal
                 ValueLayout.JAVA_LONG
             )
         );
@@ -941,6 +942,7 @@ public final class NativeBridge {
         long contextId,
         int treeShapeOrdinal,
         int delegatedPredicateCount,
+        boolean requestsRowIds,
         long queryConfigPtr
     ) {
         NativeHandle.validatePointer(readerPtr, "reader");
@@ -956,6 +958,7 @@ public final class NativeBridge {
                 contextId,
                 treeShapeOrdinal,
                 delegatedPredicateCount,
+                (byte) (requestsRowIds ? 1 : 0),
                 queryConfigPtr
             );
             return new SessionContextHandle(ptr);

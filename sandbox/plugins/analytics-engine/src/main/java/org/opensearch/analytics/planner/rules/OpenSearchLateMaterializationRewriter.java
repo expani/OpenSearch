@@ -104,6 +104,13 @@ public final class OpenSearchLateMaterializationRewriter {
     public static Optional<RelNode> rewrite(RelNode root) {
         Detection detection = detect(root);
         if (detection == null) return Optional.empty();
+        // DEBUG (off by default in prod). Tests flip the logger via cluster-settings to assert
+        // engagement; production stays log-quiet on the hot path.
+        LOGGER.debug(
+            "[QTF] fired: aboveAnchorPhysicalFields={}, belowAnchorPhysicalFields={}",
+            detection.aboveAnchorPhysicalFields(),
+            detection.belowAnchorPhysicalFields()
+        );
         return Optional.of(applyRewrite(root, detection));
     }
 
@@ -124,6 +131,12 @@ public final class OpenSearchLateMaterializationRewriter {
         BelowChain belowChain = analyzeBelow(anchorCtx.anchor.getInput());
         if (belowChain == null) {
             LOGGER.debug("[QTF] below-anchor allow-list rejected; skipping rewrite");
+            return null;
+        }
+
+        // Single-shard plans don't trigger late materialization.
+        if (!belowChain.hasExchangeReducer()) {
+            LOGGER.debug("[QTF] single-shard plan (no ExchangeReducer below anchor); skipping rewrite");
             return null;
         }
 
@@ -201,6 +214,7 @@ public final class OpenSearchLateMaterializationRewriter {
         List<RelNode> chain = new ArrayList<>();
         int[] belowProjOutToScan = null;
         OpenSearchTableScan scan = null;
+        boolean hasExchangeReducer = false;
         RelNode n = RelNodeUtils.unwrapHep(subtree);
         while (n != null) {
             if (n instanceof OpenSearchTableScan s) {
@@ -208,6 +222,7 @@ public final class OpenSearchLateMaterializationRewriter {
                 break;
             }
             if (!BELOW_INTERMEDIATE_ALLOWED.contains(n.getClass())) return null;
+            if (n instanceof OpenSearchExchangeReducer) hasExchangeReducer = true;
             if (n instanceof OpenSearchProject p) {
                 if (belowProjOutToScan != null) {
                     LOGGER.debug("[QTF] multiple Projects below anchor — skipping");
@@ -235,7 +250,7 @@ public final class OpenSearchLateMaterializationRewriter {
             n = RelNodeUtils.unwrapHep(n.getInput(0));
         }
         if (scan == null) return null;
-        return new BelowChain(chain, belowProjOutToScan, scan);
+        return new BelowChain(chain, belowProjOutToScan, scan, hasExchangeReducer);
     }
 
     /** Returns output→scanIdx map iff every project is a {@link RexInputRef}; else null. */
@@ -618,7 +633,7 @@ public final class OpenSearchLateMaterializationRewriter {
     private record AnchorContext(OpenSearchSort anchor, List<RelNode> aboveAnchorOperators) {
     }
 
-    private record BelowChain(List<RelNode> chain, int[] belowProjOutToScan, OpenSearchTableScan scan) {
+    private record BelowChain(List<RelNode> chain, int[] belowProjOutToScan, OpenSearchTableScan scan, boolean hasExchangeReducer) {
     }
 
     private record NarrowedScan(OpenSearchTableScan newScan, int[] scanIdxRemap) {

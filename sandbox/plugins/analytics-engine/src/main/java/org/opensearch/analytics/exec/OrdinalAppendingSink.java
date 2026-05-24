@@ -10,6 +10,8 @@ package org.opensearch.analytics.exec;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.opensearch.analytics.spi.ExchangeSink;
 
 /**
@@ -30,6 +32,8 @@ import org.opensearch.analytics.spi.ExchangeSink;
  */
 public final class OrdinalAppendingSink implements ExchangeSink {
 
+    private static final Logger LOGGER = LogManager.getLogger(OrdinalAppendingSink.class);
+
     private final ExchangeSink delegate;
     private final BufferAllocator allocator;
     private final String columnName;
@@ -42,6 +46,16 @@ public final class OrdinalAppendingSink implements ExchangeSink {
 
     @Override
     public void feed(VectorSchemaRoot batch, int sourceOrdinal) {
+        // FIXME [RemoveBeforeMainMerge] diagnostics for QTF VSR.addVector failure
+        LOGGER.info(
+            "FIXME [RemoveBeforeMainMerge] OrdinalAppendingSink.feed: sourceOrdinal={} columnName={} batch.rowCount={} batch.fieldVectors.size={} batch.schema={} batch.allocator={}",
+            sourceOrdinal,
+            columnName,
+            batch == null ? "null-batch" : batch.getRowCount(),
+            batch == null ? "null-batch" : batch.getFieldVectors().size(),
+            batch == null ? "null-batch" : batch.getSchema(),
+            allocator
+        );
         VectorSchemaRoot withOrdinal = VectorUtils.appendConstantInt(batch, columnName, sourceOrdinal, allocator);
         delegate.feed(withOrdinal);
     }
