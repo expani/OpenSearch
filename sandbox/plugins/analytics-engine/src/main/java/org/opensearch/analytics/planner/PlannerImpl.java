@@ -63,10 +63,6 @@ import java.util.Optional;
  * {@link RuleProfilingListener} (when profiling is enabled on
  * {@link PlannerContext}) can be threaded through every planner created here.
  *
- * <p>TODO: eliminate copyToCluster — have frontends create RelNodes with Volcano cluster.
- * <p>TODO: DAG construction (cut at exchange boundaries, build stage tree)
- * <p>TODO: Per-stage plan forking (multiple plan generation)
- * <p>TODO: Fragment conversion (backend.getFragmentConvertor())
  * <p>TODO: Join strategy selection, sort removal via CBO
  *
  * @opensearch.internal

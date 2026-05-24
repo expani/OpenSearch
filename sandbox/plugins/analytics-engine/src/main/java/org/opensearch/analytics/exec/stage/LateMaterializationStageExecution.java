@@ -300,7 +300,13 @@ public final class LateMaterializationStageExecution extends AbstractStageExecut
 
     private void drainAndClose(ActionListener<Void> listener) {
         try {
-            drainAndGroupByUgsi();
+            try {
+                drainAndGroupByUgsi();
+            } finally {
+                // Drain copied helper columns into primitive arrays; the buffered VSRs are
+                // no longer needed and their query-allocator buffers must be released here.
+                childInputBuffer.close();
+            }
             plansByUgsi = groupByUgsi();
             scatterFetchAndStitch(listener);
             // drainAndClose returns immediately after dispatching shards; the outer
@@ -412,13 +418,17 @@ public final class LateMaterializationStageExecution extends AbstractStageExecut
 
         @Override
         public void onStreamResponse(FragmentExecutionArrowResponse response, boolean isLast) {
+            VectorSchemaRoot batch = response.getRoot();
             try {
-                VectorSchemaRoot batch = response.getRoot();
                 stitcher.acceptBatch(batch, plan.positions(), rowsCopiedSoFar);
                 rowsCopiedSoFar += batch.getRowCount();
             } catch (Exception e) {
                 stitcher.shardFailed(e);
                 return;
+            } finally {
+                // Stitcher.acceptBatch only reads + copyFromSafe; ownership of the response
+                // batch's query-allocator buffers stays with this listener.
+                if (batch != null) batch.close();
             }
             if (isLast) stitcher.shardComplete();
         }

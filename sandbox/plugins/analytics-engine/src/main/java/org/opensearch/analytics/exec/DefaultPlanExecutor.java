@@ -129,6 +129,9 @@ public class DefaultPlanExecutor extends HandledTransportAction<ActionRequest, A
         RelMetadataQueryBase.THREAD_PROVIDERS.set(JaninoRelMetadataProvider.of(logicalFragment.getCluster().getMetadataProvider()));
         logicalFragment.getCluster().invalidateMetadataQuery();
 
+        // TODO : [Human Generated] Don't Delete until fixed.
+        // TODO [Design] : We need to divide these phases 
+
         RelNode plan = PlannerImpl.createPlan(logicalFragment, new PlannerContext(capabilityRegistry, clusterService.state()));
         QueryDAG dag = DAGBuilder.build(plan, capabilityRegistry, clusterService);
         PlanForker.forkAll(dag, capabilityRegistry);
