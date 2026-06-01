@@ -87,12 +87,13 @@ public class OpenSearchJoinRule extends RelOptRule {
                 "No backend supports join kind [" + requiredKind + "] among viable backends " + candidateBackends
             );
         }
-        // HEP marking only — no ER insertion. OpenSearchJoin's cost gate (SINGLETON input
-        // required) drives Volcano to insert ERs on each input via TraitDef.convert.
-        OpenSearchDistributionTraitDef distTraitDef = context.getDistributionTraitDef();
+        // HEP marking only — leave distribution at the child's distribution. The Join's
+        // own coord+singleton output is decided by OpenSearchJoinSplitRule in CBO; if we
+        // pre-stamp coord+singleton here, Volcano sees the Join as already-resolved and
+        // never inserts ERs on the inputs.
         RelNode leftUnwrapped = RelNodeUtils.unwrapHep(join.getLeft());
         RelNode rightUnwrapped = RelNodeUtils.unwrapHep(join.getRight());
-        RelTraitSet joinTraits = leftUnwrapped.getTraitSet().replace(distTraitDef.coordSingleton());
+        RelTraitSet joinTraits = leftUnwrapped.getTraitSet();
         OpenSearchJoin osJoin = new OpenSearchJoin(
             join.getCluster(),
             joinTraits,

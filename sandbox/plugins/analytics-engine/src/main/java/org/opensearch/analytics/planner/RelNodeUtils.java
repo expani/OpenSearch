@@ -139,6 +139,10 @@ public class RelNodeUtils {
             if (trait instanceof OpenSearchDistribution oldDist) {
                 // Preserve the full distribution (kind, type, keys, tableId).
                 traits = traits.replace(distTraitDef.from(oldDist));
+            } else if (trait instanceof org.apache.calcite.rel.RelCollation collation) {
+                // Preserve collation (e.g. sorted-index scan output) so SORT_REMOVE and
+                // other collation-aware rules see the right context in CBO.
+                traits = traits.replace(collation);
             }
         }
 

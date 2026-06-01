@@ -12,6 +12,7 @@ import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelTrait;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelDistribution;
 import org.apache.calcite.rel.RelNode;
 import org.opensearch.analytics.planner.PlannerContext;
@@ -77,10 +78,14 @@ public class OpenSearchJoinSplitRule extends RelOptRule {
         }
 
         // Not co-located: one side originates from a different table or shard layout, so
-        // per-side ERs are unavoidable. Demand COORDINATOR+SINGLETON on each side.
+        // per-side ERs are unavoidable. Demand COORDINATOR+SINGLETON (with EMPTY collation
+        // since ER strips collation) on each side.
+        RelTraitSet inputDemand = join.getTraitSet()
+            .replace(distTraitDef.coordSingleton())
+            .replace(RelCollations.EMPTY);
         RelTraitSet coordTraits = join.getTraitSet().replace(distTraitDef.coordSingleton());
-        RelNode gatheredLeft = convert(join.getLeft(), coordTraits);
-        RelNode gatheredRight = convert(join.getRight(), coordTraits);
+        RelNode gatheredLeft = convert(join.getLeft(), inputDemand);
+        RelNode gatheredRight = convert(join.getRight(), inputDemand);
         call.transformTo(
             join.copy(coordTraits, join.getCondition(), gatheredLeft, gatheredRight, join.getJoinType(), join.isSemiJoinDone())
         );

@@ -8,6 +8,7 @@
 
 package org.opensearch.analytics.planner.rules;
 
+import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.RelNode;
@@ -496,11 +497,12 @@ public final class OpenSearchLateMaterializationRewriter {
             }
             newCollations.add(fc.withFieldIndex(newIdx));
         }
+        RelCollation remapped = RelCollations.of(newCollations);
         return new OpenSearchSort(
             anchor.getCluster(),
-            anchor.getTraitSet(),
+            anchor.getTraitSet().replace(remapped),
             newInput,
-            RelCollations.of(newCollations),
+            remapped,
             anchor.offset,
             anchor.fetch,
             anchor.getViableBackends()

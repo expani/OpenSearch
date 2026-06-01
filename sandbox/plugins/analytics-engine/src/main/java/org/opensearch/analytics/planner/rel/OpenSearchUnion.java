@@ -99,49 +99,9 @@ public class OpenSearchUnion extends Union implements OpenSearchRelNode {
         return new OpenSearchUnion(getCluster(), traitSet, inputs, all, viableBackends);
     }
 
-    /**
-     * Cost gate. Locality of the union must match its arms:
-     * <ul>
-     *   <li>{@code COORDINATOR+SINGLETON} union → every arm must be {@code COORDINATOR+SINGLETON}.
-     *       OpenSearchUnionSplitRule's general path inserts ERs to satisfy this.</li>
-     *   <li>{@code SHARD+SINGLETON} union (co-location fast path) → every arm must be
-     *       {@code SHARD+SINGLETON} with the union's {@code tableId} and {@code shardCount=1}.</li>
-     * </ul>
-     */
     @Override
     public RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {
-        OpenSearchDistribution selfDist = distributionOf(this);
-        if (selfDist == null || selfDist.getType() != RelDistribution.Type.SINGLETON) {
-            return planner.getCostFactory().makeInfiniteCost();
-        }
-        for (RelNode input : getInputs()) {
-            OpenSearchDistribution inputDist = distributionOf(input);
-            if (inputDist == null) continue;
-            if (inputDist.getType() == RelDistribution.Type.ANY) continue;
-            if (inputDist.getType() != RelDistribution.Type.SINGLETON) {
-                return planner.getCostFactory().makeInfiniteCost();
-            }
-            if (selfDist.getLocality() != inputDist.getLocality()) {
-                return planner.getCostFactory().makeInfiniteCost();
-            }
-            if (selfDist.getLocality() == OpenSearchDistribution.Locality.SHARD) {
-                if (selfDist.getTableId() == null || !selfDist.getTableId().equals(inputDist.getTableId())) {
-                    return planner.getCostFactory().makeInfiniteCost();
-                }
-                if (!Integer.valueOf(1).equals(inputDist.getShardCount())) {
-                    return planner.getCostFactory().makeInfiniteCost();
-                }
-            }
-        }
         return planner.getCostFactory().makeTinyCost();
-    }
-
-    private static OpenSearchDistribution distributionOf(RelNode rel) {
-        for (int i = 0; i < rel.getTraitSet().size(); i++) {
-            RelTrait trait = rel.getTraitSet().getTrait(i);
-            if (trait instanceof OpenSearchDistribution dist) return dist;
-        }
-        return null;
     }
 
     @Override

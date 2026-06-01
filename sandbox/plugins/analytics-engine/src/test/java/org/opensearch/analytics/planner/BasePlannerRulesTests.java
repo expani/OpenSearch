@@ -215,6 +215,51 @@ public abstract class BasePlannerRulesTests extends OpenSearchTestCase {
         return new PlannerContext(new CapabilityRegistry(backends, fieldStorageFactory), clusterState);
     }
 
+    /**
+     * Variant of {@link #buildContextPerIndex(String, Map, Map, List)} that stamps
+     * {@code index.sort.field} / {@code index.sort.order} on every index. Use to test
+     * trait-propagation behavior over indexed-sorted scans.
+     */
+    @SuppressWarnings("unchecked")
+    protected PlannerContext buildContextPerIndex(
+        String primaryFormat,
+        Map<String, Integer> shardCountByIndex,
+        Map<String, Map<String, Object>> fieldMappings,
+        List<AnalyticsSearchBackendPlugin> backends,
+        List<String> indexSortFields,
+        List<String> indexSortOrders
+    ) {
+        Map<String, Object> mappingSource = Map.of("properties", fieldMappings);
+        Metadata metadata = mock(Metadata.class);
+        ClusterState clusterState = mock(ClusterState.class);
+        when(clusterState.metadata()).thenReturn(metadata);
+
+        for (Map.Entry<String, Integer> entry : shardCountByIndex.entrySet()) {
+            String indexName = entry.getKey();
+            int shardCount = entry.getValue();
+
+            MappingMetadata mappingMetadata = mock(MappingMetadata.class);
+            when(mappingMetadata.sourceAsMap()).thenReturn(mappingSource);
+
+            IndexMetadata indexMetadata = mock(IndexMetadata.class);
+            when(indexMetadata.getIndex()).thenReturn(new Index(indexName, indexName + "-uuid"));
+            Settings.Builder settingsBuilder = Settings.builder()
+                .put("index.composite.primary_data_format", primaryFormat)
+                .putList("index.composite.secondary_data_formats", "lucene");
+            if (!indexSortFields.isEmpty()) {
+                settingsBuilder.putList("index.sort.field", indexSortFields);
+                settingsBuilder.putList("index.sort.order", indexSortOrders);
+            }
+            when(indexMetadata.getSettings()).thenReturn(settingsBuilder.build());
+            when(indexMetadata.mapping()).thenReturn(mappingMetadata);
+            when(indexMetadata.getNumberOfShards()).thenReturn(shardCount);
+            when(metadata.index(indexName)).thenReturn(indexMetadata);
+        }
+
+        Function<IndexMetadata, FieldStorageResolver> fieldStorageFactory = FieldStorageResolver::new;
+        return new PlannerContext(new CapabilityRegistry(backends, fieldStorageFactory), clusterState);
+    }
+
     // ---- Table builders ----
 
     protected RelOptTable mockTable(String tableName, String... fieldNames) {

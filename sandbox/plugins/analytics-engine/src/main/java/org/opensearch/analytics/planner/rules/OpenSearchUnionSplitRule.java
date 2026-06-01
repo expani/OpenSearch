@@ -12,6 +12,7 @@ import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelTrait;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelDistribution;
 import org.apache.calcite.rel.RelNode;
 import org.opensearch.analytics.planner.PlannerContext;
@@ -79,12 +80,15 @@ public class OpenSearchUnionSplitRule extends RelOptRule {
         }
 
         // Not co-located: at least one arm originates from a different table or shard layout,
-        // so per-arm ERs are unavoidable. Demand COORDINATOR+SINGLETON on each arm; Volcano
-        // materializes an ER on any arm not already there via TraitDef.convert.
+        // so per-arm ERs are unavoidable. Demand COORDINATOR+SINGLETON+EMPTY-collation on each
+        // arm (ER strips collation). Volcano materializes an ER on any arm not already there.
+        RelTraitSet inputDemand = union.getTraitSet()
+            .replace(distTraitDef.coordSingleton())
+            .replace(RelCollations.EMPTY);
         RelTraitSet coordTraits = union.getTraitSet().replace(distTraitDef.coordSingleton());
         List<RelNode> gatheredInputs = new ArrayList<>(union.getInputs().size());
         for (RelNode input : union.getInputs()) {
-            gatheredInputs.add(convert(input, coordTraits));
+            gatheredInputs.add(convert(input, inputDemand));
         }
         call.transformTo(union.copy(coordTraits, gatheredInputs, union.all));
     }

@@ -67,7 +67,7 @@ public final class OpenSearchTopKRewriter {
         );
         OpenSearchSort shardSort = new OpenSearchSort(
             sort.getCluster(),
-            partial.getTraitSet(),
+            partial.getTraitSet().replace(sort.getCollation()),
             partial,
             sort.getCollation(),
             null,

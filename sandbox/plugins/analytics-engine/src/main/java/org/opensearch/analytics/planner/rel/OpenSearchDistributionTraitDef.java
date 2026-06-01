@@ -167,10 +167,24 @@ public class OpenSearchDistributionTraitDef extends RelTraitDef<OpenSearchDistri
             // ER output always lives at the coordinator. Even if the demand is null-locality
             // (root demand), stamp COORDINATOR so the resulting subset is well-typed.
             OpenSearchDistribution stamp = toTrait.getLocality() == null ? coordSingleton() : toTrait;
-            result = new OpenSearchExchangeReducer(rel.getCluster(), rel.getTraitSet().replace(stamp), rel, reduceViable);
+            // ER strips collation: stamp coord+singleton AND empty collation on the output
+            // traitSet. The constructor used to silently force EMPTY; making it explicit at
+            // the call site keeps trait flow visible in code.
+            org.apache.calcite.plan.RelTraitSet erTraits = rel.getTraitSet()
+                .replace(stamp)
+                .replace(org.apache.calcite.rel.RelCollations.EMPTY);
+            result = new OpenSearchExchangeReducer(rel.getCluster(), erTraits, rel, reduceViable);
         } else {
-            // TODO: implement HASH/RANGE shuffle exchange when joins and shuffle aggregates are added.
-            throw new UnsupportedOperationException("HASH/RANGE exchange not yet implemented [toTrait=" + toTrait + "]");
+            // HASH/RANGE shuffle exchange not yet implemented. Return null so Calcite
+            // gracefully skips this conversion path. The planner falls back to enumerating
+            // SINGLETON-based alternatives via the split rules. When we add hash join /
+            // shuffle aggregate, this becomes a real branch that constructs an
+            // OpenSearchHashShuffleReducer (or equivalent) here.
+            // Note: returning null is an intentional contract per RelTraitDef.convert —
+            // "returns null if the trait can't be converted". We log so the absence is
+            // observable in CBO traces.
+            LOGGER.debug("convert(): no converter for {} (skipping; not implemented)", toTrait);
+            return null;
         }
 
         return planner.register(result, rel);

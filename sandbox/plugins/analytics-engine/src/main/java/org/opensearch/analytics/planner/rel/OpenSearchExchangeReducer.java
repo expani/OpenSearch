@@ -75,6 +75,8 @@ public class OpenSearchExchangeReducer extends ConverterImpl implements OpenSear
         // ConverterImpl makes this a Calcite-recognized trait converter — inserted by
         // Volcano via OpenSearchDistributionTraitDef.convert when a downstream operator
         // demands SINGLETON input and the child delivers RANDOM.
+        // Callers MUST pass a traitSet with EMPTY collation: concat ER strips collation
+        // and the trait must reflect that for SORT_REMOVE / passThrough to reason correctly.
         super(cluster, null, traitSet, input);
         this.viableBackends = viableBackends;
         this.exchangeInfo = exchangeInfo;

@@ -12,6 +12,9 @@ import org.apache.calcite.plan.RelOptAbstractTable;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelOptTable;
+import org.apache.calcite.rel.RelCollation;
+import org.apache.calcite.rel.RelCollations;
+import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.opensearch.analytics.planner.CapabilityRegistry;
@@ -21,6 +24,9 @@ import org.opensearch.analytics.planner.PlannerContext;
 import org.opensearch.analytics.planner.rel.OpenSearchTableScan;
 import org.opensearch.analytics.spi.DelegationType;
 import org.opensearch.analytics.spi.FieldStorageInfo;
+import org.opensearch.cluster.metadata.IndexMetadata;
+import org.opensearch.index.IndexSortConfig;
+import org.opensearch.search.sort.SortOrder;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -100,6 +106,12 @@ public class OpenSearchTableScanRule extends RelOptRule {
 
         RelOptTable indexNameTable = new IndexNameTable(scan.getTable(), tableName);
 
+        // Read index.sort.field / index.sort.order from each backing index. If every
+        // index agrees on the same sort spec AND every sort field is present in the
+        // scan's projected fields, declare a RelCollation on the scan's output.
+        // Trait propagation + SORT_REMOVE will then eliminate redundant Sorts.
+        RelCollation indexCollation = resolveIndexCollation(resolution.concreteIndices(), scan.getRowType());
+
         call.transformTo(
             OpenSearchTableScan.create(
                 scan.getCluster(),
@@ -107,10 +119,64 @@ public class OpenSearchTableScanRule extends RelOptRule {
                 viableBackends,
                 fieldStorage,
                 resolution.totalShardCount(),
-                context.getDistributionTraitDef()
+                context.getDistributionTraitDef(),
+                indexCollation
             )
         );
     }
+
+    /**
+     * Resolves the common index sort across all backing indices. Returns
+     * {@link RelCollations#EMPTY} when:
+     * <ul>
+     *   <li>any backing index has no {@code index.sort.field};</li>
+     *   <li>backing indices disagree on sort fields/orders (alias to mixed indices);</li>
+     *   <li>any sort field isn't in the scan's row type (we can't express a collation
+     *       over a field we're not emitting).</li>
+     * </ul>
+     *
+     * <p>Field-index resolution uses the row type's field list — Calcite enforces
+     * unique field names within a {@link org.apache.calcite.rel.type.RelDataType},
+     * so {@code getField(name, ...)} is unambiguous.
+     */
+    private static RelCollation resolveIndexCollation(List<IndexMetadata> indices, org.apache.calcite.rel.type.RelDataType rowType) {
+        if (indices.isEmpty()) {
+            return RelCollations.EMPTY;
+        }
+        List<String> commonFields = null;
+        List<SortOrder> commonOrders = null;
+        for (IndexMetadata indexMetadata : indices) {
+            List<String> fields = IndexSortConfig.INDEX_SORT_FIELD_SETTING.get(indexMetadata.getSettings());
+            if (fields.isEmpty()) {
+                return RelCollations.EMPTY;
+            }
+            List<SortOrder> orders = IndexSortConfig.INDEX_SORT_ORDER_SETTING.get(indexMetadata.getSettings());
+            // Default to ASC for any missing entry (matches Lucene's IndexSortConfig default).
+            List<SortOrder> normalizedOrders = new ArrayList<>(fields.size());
+            for (int i = 0; i < fields.size(); i++) {
+                normalizedOrders.add(i < orders.size() ? orders.get(i) : SortOrder.ASC);
+            }
+            if (commonFields == null) {
+                commonFields = fields;
+                commonOrders = normalizedOrders;
+            } else if (!commonFields.equals(fields) || !commonOrders.equals(normalizedOrders)) {
+                return RelCollations.EMPTY;
+            }
+        }
+        List<RelFieldCollation> fieldCollations = new ArrayList<>(commonFields.size());
+        for (int i = 0; i < commonFields.size(); i++) {
+            org.apache.calcite.rel.type.RelDataTypeField rowField = rowType.getField(commonFields.get(i), false, false);
+            if (rowField == null) {
+                return RelCollations.EMPTY;
+            }
+            RelFieldCollation.Direction direction = commonOrders.get(i) == SortOrder.DESC
+                ? RelFieldCollation.Direction.DESCENDING
+                : RelFieldCollation.Direction.ASCENDING;
+            fieldCollations.add(new RelFieldCollation(rowField.getIndex(), direction));
+        }
+        return RelCollations.of(fieldCollations);
+    }
+
 
     /**
      * Wraps a {@link RelOptTable} with just the bare index name as the qualified name.

@@ -90,23 +90,25 @@ public class OpenSearchProject extends Project implements OpenSearchRelNode {
     }
 
     /**
-     * Projects containing {@code RexOver} (window functions) need fully-gathered input so the
-     * window's global frame semantics are correct — infinite cost unless input is SINGLETON.
-     * Volcano picks the plan where an ER sits under this project.
+     * Window functions (RexOver) need globally-gathered input — partial windows over per-shard
+     * inputs would compute the wrong frame. Until we have a dedicated {@code OpenSearchWindow}
+     * operator that declares this requirement via a SplitRule (see also {@code OpenSearchSortSplitRule}),
+     * Project gates window-function plans by returning infinite cost when input is non-SINGLETON.
+     * Volcano then picks the plan where {@code OpenSearchDistributionDeriveRule} has synthesized
+     * a SINGLETON variant of this Project's input subset.
      *
-     * <p>Plain projects (no RexOver) have no ordering requirement — tiny cost unconditionally.
+     * <p>Plain Projects (no RexOver) are tinyCost — distribution-agnostic, no gate needed.
      */
     @Override
     public RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {
         if (!containsOver()) {
             return planner.getCostFactory().makeTinyCost();
         }
-        // containsOver() is Calcite's own — inherited from Project.
         for (int i = 0; i < getInput().getTraitSet().size(); i++) {
-            RelTrait trait = getInput().getTraitSet().getTrait(i);
+            org.apache.calcite.plan.RelTrait trait = getInput().getTraitSet().getTrait(i);
             if (trait instanceof OpenSearchDistribution distribution) {
-                boolean singletonOrAny = distribution.getType() == RelDistribution.Type.SINGLETON
-                    || distribution.getType() == RelDistribution.Type.ANY;
+                boolean singletonOrAny = distribution.getType() == org.apache.calcite.rel.RelDistribution.Type.SINGLETON
+                    || distribution.getType() == org.apache.calcite.rel.RelDistribution.Type.ANY;
                 if (!singletonOrAny) {
                     return planner.getCostFactory().makeInfiniteCost();
                 }

@@ -103,34 +103,20 @@ public class OpenSearchSort extends Sort implements OpenSearchRelNode {
     }
 
     /**
-     * A collated Sort needs globally-ordered input. Our {@link OpenSearchExchangeReducer}
-     * is a concat gather (not a merge exchange), so per-partition sort + ER produces
-     * partition-locally ordered rows concatenated in arrival order — wrong. Returning
-     * infinite cost unless the input is EXECUTION(SINGLETON) forces Volcano to pick the
-     * {@link org.opensearch.analytics.planner.rules.OpenSearchSortSplitRule} alternative
-     * (ER below the Sort, Sort sees a fully-gathered input).
-     *
-     * <p>Pure LIMIT Sort (empty collation) — nothing to order, partition-local fetch is
-     * correct. Skip the gate.
+     * Realistic n*log(n) cost. Sort placement is decided by trait propagation in
+     * {@link org.opensearch.analytics.planner.rules.OpenSearchSortSplitRule}, not by
+     * cost gates — the rule emits an alternative with the ER positioned correctly
+     * for collation correctness. Pure LIMIT Sort (no collation) skips the n*log(n)
+     * factor since there's no comparison work.
      */
     @Override
     public RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {
         if (getCollation().getFieldCollations().isEmpty()) {
             return planner.getCostFactory().makeTinyCost();
         }
-        for (RelNode input : getInputs()) {
-            for (int i = 0; i < input.getTraitSet().size(); i++) {
-                RelTrait trait = input.getTraitSet().getTrait(i);
-                if (trait instanceof OpenSearchDistribution distribution) {
-                    boolean singletonOrAny = distribution.getType() == RelDistribution.Type.SINGLETON
-                        || distribution.getType() == RelDistribution.Type.ANY;
-                    if (!singletonOrAny) {
-                        return planner.getCostFactory().makeInfiniteCost();
-                    }
-                }
-            }
-        }
-        return planner.getCostFactory().makeTinyCost();
+        double rows = mq.getRowCount(getInput());
+        double cost = rows * Math.max(1.0, Math.log(Math.max(2.0, rows)));
+        return planner.getCostFactory().makeCost(cost, cost, 0);
     }
 
     @Override

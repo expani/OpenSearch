@@ -15,6 +15,7 @@ import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.plan.volcano.AbstractConverter;
 import org.apache.calcite.plan.volcano.VolcanoPlanner;
+import org.apache.calcite.rel.RelCollationTraitDef;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.core.Project;
@@ -272,12 +273,19 @@ public class PlannerImpl {
         volcanoPlanner.addRelTraitDef(ConventionTraitDef.INSTANCE);
         OpenSearchDistributionTraitDef distTraitDef = context.getDistributionTraitDef();
         volcanoPlanner.addRelTraitDef(distTraitDef);
+        // Register collation as a tracked trait. ER strips collation; split rules
+        // demand collation downstream of ER. Without this, collation lives only in
+        // Sort's RelCollation argument and isn't enforced through trait propagation.
+        volcanoPlanner.addRelTraitDef(RelCollationTraitDef.INSTANCE);
         volcanoPlanner.addRule(new OpenSearchAggregateSplitRule(context));
         volcanoPlanner.addRule(new OpenSearchSortSplitRule(context));
         volcanoPlanner.addRule(new OpenSearchJoinSplitRule(context));
         volcanoPlanner.addRule(new OpenSearchUnionSplitRule(context));
         volcanoPlanner.addRule(new OpenSearchDistributionDeriveRule(context));
         volcanoPlanner.addRule(AbstractConverter.ExpandConversionRule.INSTANCE);
+        // Removes a Sort whose input already provides the required collation (e.g. an
+        // indexed-sorted scan). Trait-prop tracks collation; this rule consumes that.
+        volcanoPlanner.addRule(CoreRules.SORT_REMOVE);
 
         if (listener != null) {
             volcanoPlanner.addListener(listener);
@@ -285,6 +293,15 @@ public class PlannerImpl {
         }
         try {
             RelOptCluster volcanoCluster = RelOptCluster.create(volcanoPlanner, rawRelNode.getCluster().getRexBuilder());
+            // Chain our OpenSearch-specific RowCount handler ahead of Calcite's defaults.
+            // ChainedRelMetadataProvider tries our provider first; falls back to Calcite's
+            // built-in handlers for everything else (selectivity, distinct counts, etc).
+            org.apache.calcite.rel.metadata.RelMetadataProvider chained =
+                org.apache.calcite.rel.metadata.ChainedRelMetadataProvider.of(java.util.List.of(
+                    OpenSearchRelMdRowCount.SOURCE,
+                    org.apache.calcite.rel.metadata.DefaultRelMetadataProvider.INSTANCE
+                ));
+            volcanoCluster.setMetadataProvider(chained);
             volcanoCluster.setMetadataQuerySupplier(RelMetadataQuery::instance);
 
             // TODO: eliminate this copy

@@ -12,6 +12,8 @@ import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.RelCollation;
+import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.core.TableScan;
@@ -91,13 +93,17 @@ public class OpenSearchTableScan extends TableScan implements OpenSearchRelNode 
         List<String> viableBackends,
         List<FieldStorageInfo> outputFieldStorage,
         int shardCount,
-        OpenSearchDistributionTraitDef distTraitDef
+        OpenSearchDistributionTraitDef distTraitDef,
+        RelCollation indexCollation
     ) {
         int tableId = table.getQualifiedName().hashCode();
         OpenSearchDistribution distribution = shardCount == 1
             ? distTraitDef.shardSingleton(tableId, shardCount)
             : distTraitDef.shardRandom(tableId, shardCount);
-        RelTraitSet traitSet = RelTraitSet.createEmpty().plus(OpenSearchConvention.INSTANCE).plus(distribution);
+        RelTraitSet traitSet = RelTraitSet.createEmpty()
+            .plus(OpenSearchConvention.INSTANCE)
+            .plus(distribution)
+            .plus(indexCollation);
         return new OpenSearchTableScan(cluster, traitSet, table, viableBackends, outputFieldStorage);
     }
 

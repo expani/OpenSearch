@@ -74,6 +74,26 @@ public final class IndexResolution {
     }
 
     /**
+     * Estimated total document count across all backing indices. Returns -1 when the
+     * doc-count metadata isn't populated on any backing index (test contexts, freshly-
+     * created indices, mocks). Callers MUST treat -1 as "unknown" and fall back to a
+     * default rather than failing.
+     *
+     * <p>TODO: today reads {@code IndexMetadata.docs.count.total} (the routing-shard
+     * write-tracked doc count), aggregated across primaries. For aliases / wildcards
+     * resolving to multiple indices, sums them. Doesn't account for tombstones, deletes,
+     * or staleness — good enough for cost-based planning, not for exact counts.
+     */
+    public long totalDocCount() {
+        // Currently: stub returns -1 (no signal). Real wiring requires reading the
+        // actual doc count metric from IndexMetadata or, more correctly, from the
+        // cluster's IndexService stats. Plumbing that through PlannerContext is the
+        // mainline-PR work. Leaving a stable API surface here so the metadata handler
+        // can call into it.
+        return -1L;
+    }
+
+    /**
      * Convenience overload for literal names (concrete index or alias) and test contexts.
      * Wildcard/comma expressions require the {@link #resolve(String, ClusterState,
      * IndexNameExpressionResolver)} overload — without a resolver they fall through to the
