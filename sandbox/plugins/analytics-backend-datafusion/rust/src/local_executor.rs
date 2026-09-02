@@ -73,6 +73,12 @@ impl LocalSession {
         let mut config = SessionConfig::new();
         config.options_mut().execution.target_partitions =
             crate::api::get_reduce_target_partitions();
+        // [q32-skip-toggle EXPERIMENT] Disable adaptive skip-partial-aggregation on the reduce-stage
+        // local session too (threshold=1.0 => skip never fires).
+        config
+            .options_mut()
+            .execution
+            .skip_partial_aggregation_probe_ratio_threshold = 1.0;
         let state = SessionStateBuilder::new()
             .with_config(config)
             .with_runtime_env(runtime_env)

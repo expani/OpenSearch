@@ -168,6 +168,14 @@ pub fn build_query_session_context(
         query_config.listing_table_pushdown_filters;
     config.options_mut().execution.target_partitions = target_partitions.max(1);
     config.options_mut().execution.batch_size = query_config.batch_size;
+    // [q32-skip-toggle EXPERIMENT] Disable DataFusion's adaptive skip-partial-aggregation on the
+    // indexed/query executor session — this is the path that runs the composite-index parquet scan +
+    // Partial + FinalPartitioned aggregation for single-shard group-bys (indexed_executor.rs).
+    // threshold=1.0 => probe ratio (num_groups/input_rows) can never exceed it => skip never fires.
+    config
+        .options_mut()
+        .execution
+        .skip_partial_aggregation_probe_ratio_threshold = 1.0;
 
     let mut builder = SessionStateBuilder::new()
         .with_config(config)
