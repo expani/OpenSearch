@@ -242,15 +242,16 @@ pub async unsafe fn create_session_context(
     let has_topk = has_partial_aggregate && substrait_has_fetch_rel(plan_bytes);
     config.options_mut().execution.parquet.pushdown_filters =
         query_config.listing_table_pushdown_filters;
-    // Disable DataFusion's adaptive skip-partial-aggregation when TopK is active.
-    // If DF abandons partial agg midstream, the partial state sent to the coordinator is
-    // incomplete — TopK sees wrong group counts and produces incorrect results.
-    if has_topk {
-        config
-            .options_mut()
-            .execution
-            .skip_partial_aggregation_probe_ratio_threshold = 1.0;
-    }
+    // [q32-skip-toggle EXPERIMENT] Unconditionally disable DataFusion's adaptive
+    // skip-partial-aggregation (threshold=1.0 => probe ratio can never exceed it =>
+    // skip never fires) to falsify/confirm the q32 Mustang>ClickHouse win mechanism.
+    // Original code guarded this with `if has_topk` (only disabled when TopK active);
+    // here it applies to ALL queries so q32 (has_topk=false) also runs full partial agg.
+    // (has_topk is still consumed later where it is stored on the handle.)
+    config
+        .options_mut()
+        .execution
+        .skip_partial_aggregation_probe_ratio_threshold = 1.0;
     config.options_mut().execution.target_partitions = effective_partitions;
     config.options_mut().execution.batch_size = effective_batch_size;
     // When the index has `index.sort.field`, ask DataFusion to use the sort-aware
