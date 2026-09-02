@@ -306,10 +306,30 @@ pub async unsafe fn create_session_context(
         .with_collect_stat(true)
         .with_target_partitions(effective_partitions);
 
-    if let Some(sort_exprs) =
-        build_file_sort_order(&shard_view.sort_fields, &shard_view.sort_orders)
-    {
-        listing_options = listing_options.with_file_sort_order(vec![sort_exprs]);
+    // ClickBench-43 per-fix experiment (cliff-gate, REAL lever): advertising the scan's
+    // `output_ordering` (via `with_file_sort_order`) makes DataFusion elect an ordered
+    // aggregate (`ordering_mode=Sorted` + `preserve_order`) for a GROUP BY on the leading
+    // index.sort column. That order-preserving path throttles the parallel scan feed on
+    // r7g/c6a/Intel — the measured q23/q27 "cliff". Suppress the advertised ordering for
+    // aggregate / GROUP BY shapes (they don't need it); keep it for pure scan / scan+TopK
+    // shapes (ORDER BY sort_key LIMIT, TopK dynamic-filter row-group pruning) that benefit.
+    // NOTE: `has_partial_aggregate` is FALSE on single shard (it flags cross-shard partial
+    // fragments only), so the shape must be read from the Substrait plan, not that flag.
+    let is_aggregate_shape = substrait_has_aggregate_rel(plan_bytes);
+    // FIXME [RemoveBeforeMerge] cliff-gate diagnostic (native bridge macro → Log4j via RustLoggerBridge).
+    log_debug!(
+        "[cliff-gate] sort_fields={} is_aggregate_shape={} has_partial_aggregate={} -> advertise_output_ordering={}",
+        shard_view.sort_fields.len(),
+        is_aggregate_shape,
+        has_partial_aggregate,
+        !is_aggregate_shape
+    );
+    if !is_aggregate_shape {
+        if let Some(sort_exprs) =
+            build_file_sort_order(&shard_view.sort_fields, &shard_view.sort_orders)
+        {
+            listing_options = listing_options.with_file_sort_order(vec![sort_exprs]);
+        }
     }
 
     // Register under the planner's logical table name (alias / index pattern / index), shipped
@@ -663,6 +683,39 @@ fn substrait_has_fetch_rel(plan_bytes: &[u8]) -> bool {
             rr.input.as_ref().map_or(false, |r| rel_has_fetch(r))
         }
         Some(substrait::proto::plan_rel::RelType::Rel(r)) => rel_has_fetch(r),
+        None => false,
+    })
+}
+
+/// ClickBench-43 per-fix experiment (cliff-gate): true iff the Substrait fragment contains an
+/// `AggregateRel`. Used to suppress the scan's advertised `output_ordering` for aggregate/GROUP BY
+/// shapes so the planner does NOT elect an order-preserving aggregate (`ordering_mode=Sorted`) on
+/// the leading index.sort column (the q23/q27 "cliff"). Pure scan / scan+TopK shapes have no
+/// AggregateRel and keep the ordering. `has_partial_aggregate` cannot be used here — it is false on
+/// single shard — so the shape is read from the plan bytes, matching `substrait_has_fetch_rel`.
+fn substrait_has_aggregate_rel(plan_bytes: &[u8]) -> bool {
+    use prost::Message;
+    use substrait::proto::rel::RelType;
+
+    fn rel_has_aggregate(rel: &substrait::proto::Rel) -> bool {
+        match rel.rel_type.as_ref() {
+            Some(RelType::Aggregate(_)) => true,
+            Some(RelType::Sort(s)) => s.input.as_ref().map_or(false, |r| rel_has_aggregate(r)),
+            Some(RelType::Project(p)) => p.input.as_ref().map_or(false, |r| rel_has_aggregate(r)),
+            Some(RelType::Filter(f)) => f.input.as_ref().map_or(false, |r| rel_has_aggregate(r)),
+            Some(RelType::Fetch(f)) => f.input.as_ref().map_or(false, |r| rel_has_aggregate(r)),
+            _ => false,
+        }
+    }
+
+    let Ok(plan) = substrait::proto::Plan::decode(plan_bytes) else {
+        return false;
+    };
+    plan.relations.iter().any(|pr| match pr.rel_type.as_ref() {
+        Some(substrait::proto::plan_rel::RelType::Root(rr)) => {
+            rr.input.as_ref().map_or(false, |r| rel_has_aggregate(r))
+        }
+        Some(substrait::proto::plan_rel::RelType::Rel(r)) => rel_has_aggregate(r),
         None => false,
     })
 }

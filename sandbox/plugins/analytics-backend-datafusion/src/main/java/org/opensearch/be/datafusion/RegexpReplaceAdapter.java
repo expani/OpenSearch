@@ -8,6 +8,8 @@
 
 package org.opensearch.be.datafusion;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexCall;
@@ -24,6 +26,9 @@ import java.util.List;
 /** Adapts {@code REGEXP_REPLACE} for DataFusion: expand {@code \Q…\E}, brace {@code $N}, append "g" flag. */
 class RegexpReplaceAdapter implements ScalarFunctionAdapter {
 
+    // FIXME [RemoveBeforeMerge] diagnostic logger for the anchored-specialization experiment.
+    private static final Logger LOG = LogManager.getLogger(RegexpReplaceAdapter.class);
+
     private static final String REGEX_METACHARS = ".\\+*?^$()[]{}|/";
 
     @Override
@@ -34,14 +39,16 @@ class RegexpReplaceAdapter implements ScalarFunctionAdapter {
         RexNode patternOperand = original.getOperands().get(1);
         RexNode replacementOperand = original.getOperands().get(2);
 
-        String rewrittenPattern = null;
+        String patternStr = null;
         if (patternOperand instanceof RexLiteral patternLiteral) {
-            String pattern = patternLiteral.getValueAs(String.class);
-            if (pattern != null && pattern.contains("\\Q")) {
-                String rewritten = unquoteJavaRegex(pattern);
-                if (!pattern.equals(rewritten)) {
-                    rewrittenPattern = rewritten;
-                }
+            patternStr = patternLiteral.getValueAs(String.class);
+        }
+
+        String rewrittenPattern = null;
+        if (patternStr != null && patternStr.contains("\\Q")) {
+            String rewritten = unquoteJavaRegex(patternStr);
+            if (!patternStr.equals(rewritten)) {
+                rewrittenPattern = rewritten;
             }
         }
 
@@ -56,7 +63,25 @@ class RegexpReplaceAdapter implements ScalarFunctionAdapter {
             }
         }
 
-        boolean appendGlobalFlag = original.getOperator() == SqlLibraryOperators.REGEXP_REPLACE_3 && original.getOperands().size() == 3;
+        // ClickBench-43 per-fix experiment (regexp anchored specialization):
+        // PPL/Spark regexp_replace and ClickHouse REGEXP_REPLACE are GLOBAL (replace-all), so we
+        // normally append the "g" flag to the 3-arg form. But when the pattern is an anchored
+        // whole-string match (^...$, no top-level alternation) it matches at most ONCE, so global
+        // and first-match are identical — we keep the cheaper 3-arg first-match form and avoid the
+        // global-scan overhead (measured ~2.5x on the q28 Referer pattern). Same-answer: fires only
+        // on provably single-match patterns; any other/unknown pattern keeps global semantics.
+        String effectivePattern = rewrittenPattern != null ? rewrittenPattern : patternStr;
+        boolean singleMatchPattern = isAnchoredWholeMatch(effectivePattern);
+        boolean appendGlobalFlag = original.getOperator() == SqlLibraryOperators.REGEXP_REPLACE_3
+            && original.getOperands().size() == 3
+            && !singleMatchPattern;
+        // FIXME [RemoveBeforeMerge] anchored-specialization diagnostic.
+        LOG.debug(
+            "[regexp-anchored] pattern={} singleMatchPattern={} appendGlobalFlag={}",
+            effectivePattern,
+            singleMatchPattern,
+            appendGlobalFlag
+        );
 
         if (rewrittenPattern == null && rewrittenReplacement == null && !appendGlobalFlag) {
             return original;
@@ -76,6 +101,31 @@ class RegexpReplaceAdapter implements ScalarFunctionAdapter {
             return rexBuilder.makeCall(original.getType(), SqlLibraryOperators.REGEXP_REPLACE_PG_4, newOperands);
         }
         return rexBuilder.makeCall(original.getType(), original.getOperator(), newOperands);
+    }
+
+    /**
+     * True iff {@code pattern} is a literal anchored whole-string match: starts with {@code ^},
+     * ends with an unescaped {@code $}, and contains no top-level alternation ({@code |}). Such a
+     * pattern can match at most once, so global replace-all is identical to first-match and the
+     * "g" flag (and its global-scan cost) can be dropped without changing results. Conservative:
+     * returns false for a null/non-literal pattern, an escaped trailing {@code \$}, or any {@code |}.
+     */
+    static boolean isAnchoredWholeMatch(String pattern) {
+        if (pattern == null || pattern.length() < 2) {
+            return false;
+        }
+        if (pattern.charAt(0) != '^' || pattern.charAt(pattern.length() - 1) != '$') {
+            return false;
+        }
+        // Trailing '$' must be a real end-anchor, not an escaped literal '\$'.
+        if (pattern.charAt(pattern.length() - 2) == '\\') {
+            return false;
+        }
+        // Any alternation could admit a branch that is not whole-string-anchored → not provably single-match.
+        if (pattern.indexOf('|') >= 0) {
+            return false;
+        }
+        return true;
     }
 
     /** Wrap bare {@code $N} backreferences in braces, preserving {@code $$} and {@code ${…}}. */
