@@ -77,7 +77,19 @@ pub async fn execute_query(
     // Register the standard DataFusion ListingTable. This function only runs the vanilla
     // (non-row-id) path — QTF row-id plans always route to the indexed executor.
     // Declares the per-file sort order when the index has `index.sort.field`.
-    register_listing_table(&ctx, &table_name, table_path, sort_fields, sort_orders).await?;
+    //
+    // ClickBench-43 cliff-gate (legacy vanilla path — symmetric with the instruction path's gate in
+    // session_context.rs): suppress the advertised scan `output_ordering` for aggregate / GROUP BY
+    // shapes so the planner does NOT elect an order-preserving aggregate (`ordering_mode=Sorted` +
+    // `preserve_order`) on the leading index.sort column (the q23/q27 "cliff"). Pure scan / scan+TopK
+    // shapes keep the ordering (they benefit: ORDER BY sort_key LIMIT, TopK dynamic-filter pruning).
+    let is_aggregate_shape = crate::session_context::substrait_has_aggregate_rel(&plan_bytes);
+    let (sf, so): (&[String], &[String]) = if is_aggregate_shape {
+        (&[], &[])
+    } else {
+        (sort_fields, sort_orders)
+    };
+    register_listing_table(&ctx, &table_name, table_path, sf, so).await?;
 
     // Planning: build the query DataFrame (Substrait decode for normal search, native filter for an
     // engine-internal point lookup). Physical planning + execution below is shared by both.

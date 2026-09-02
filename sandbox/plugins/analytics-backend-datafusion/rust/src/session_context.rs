@@ -693,7 +693,7 @@ fn substrait_has_fetch_rel(plan_bytes: &[u8]) -> bool {
 /// the leading index.sort column (the q23/q27 "cliff"). Pure scan / scan+TopK shapes have no
 /// AggregateRel and keep the ordering. `has_partial_aggregate` cannot be used here — it is false on
 /// single shard — so the shape is read from the plan bytes, matching `substrait_has_fetch_rel`.
-fn substrait_has_aggregate_rel(plan_bytes: &[u8]) -> bool {
+pub(crate) fn substrait_has_aggregate_rel(plan_bytes: &[u8]) -> bool {
     use prost::Message;
     use substrait::proto::rel::RelType;
 
