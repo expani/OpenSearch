@@ -175,7 +175,7 @@ pub fn build_query_session_context(
     config
         .options_mut()
         .execution
-        .skip_partial_aggregation_probe_ratio_threshold = 1.0;
+        .skip_partial_aggregation_probe_ratio_threshold = 2.0;
 
     let mut builder = SessionStateBuilder::new()
         .with_config(config)

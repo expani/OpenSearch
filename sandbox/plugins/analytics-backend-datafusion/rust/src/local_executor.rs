@@ -78,7 +78,7 @@ impl LocalSession {
         config
             .options_mut()
             .execution
-            .skip_partial_aggregation_probe_ratio_threshold = 1.0;
+            .skip_partial_aggregation_probe_ratio_threshold = 2.0;
         let state = SessionStateBuilder::new()
             .with_config(config)
             .with_runtime_env(runtime_env)

@@ -251,7 +251,7 @@ pub async unsafe fn create_session_context(
     config
         .options_mut()
         .execution
-        .skip_partial_aggregation_probe_ratio_threshold = 1.0;
+        .skip_partial_aggregation_probe_ratio_threshold = 2.0;
     config.options_mut().execution.target_partitions = effective_partitions;
     config.options_mut().execution.batch_size = effective_batch_size;
     // When the index has `index.sort.field`, ask DataFusion to use the sort-aware
@@ -475,7 +475,7 @@ pub async unsafe fn create_worker_session_context(
     config
         .options_mut()
         .execution
-        .skip_partial_aggregation_probe_ratio_threshold = 1.0;
+        .skip_partial_aggregation_probe_ratio_threshold = 2.0;
     // When the coordinator estimates this worker join's build side is too large for an in-memory
     // hash table, it sets prefer_hash_join=false so DataFusion's physical planner emits a spillable
     // SortMergeJoinExec instead of the non-spillable HashJoinExec build.
@@ -1154,7 +1154,7 @@ mod tests {
             config
                 .options_mut()
                 .execution
-                .skip_partial_aggregation_probe_ratio_threshold = 1.0;
+                .skip_partial_aggregation_probe_ratio_threshold = 2.0;
         }
         assert_eq!(
             config
