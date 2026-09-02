@@ -469,6 +469,13 @@ pub async unsafe fn create_worker_session_context(
     let mut config = SessionConfig::new();
     config.options_mut().execution.target_partitions = query_config.target_partitions;
     config.options_mut().execution.batch_size = query_config.batch_size;
+    // [q32-skip-toggle EXPERIMENT] Also disable adaptive skip-partial-aggregation on the worker
+    // (shard) fragment session — this is the path that runs the Partial AggregateExec for
+    // single-shard group-bys. threshold=1.0 => probe ratio can never exceed it => skip never fires.
+    config
+        .options_mut()
+        .execution
+        .skip_partial_aggregation_probe_ratio_threshold = 1.0;
     // When the coordinator estimates this worker join's build side is too large for an in-memory
     // hash table, it sets prefer_hash_join=false so DataFusion's physical planner emits a spillable
     // SortMergeJoinExec instead of the non-spillable HashJoinExec build.
