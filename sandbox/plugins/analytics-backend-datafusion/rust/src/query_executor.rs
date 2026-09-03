@@ -34,7 +34,7 @@ use crate::executor::DedicatedExecutor;
 use crate::helper::{
     build_query_runtime_env_with_store, build_query_session_context, register_listing_table,
 };
-use crate::session_context::SessionContextHandle;
+use crate::session_context::{substrait_has_aggregate_rel, SessionContextHandle};
 
 /// Execute a vanilla parquet query: substrait plan → DataFusion → CrossRtStream.
 /// File access goes through DataFusion's registered object store.
@@ -80,7 +80,15 @@ pub async fn execute_query(
     // Register the standard DataFusion ListingTable. This function only runs the vanilla
     // (non-row-id) path — QTF row-id plans always route to the indexed executor.
     // Declares the per-file sort order when the index has `index.sort.field`.
-    register_listing_table(&ctx, &table_name, table_path, sort_fields, sort_orders).await?;
+    // DF55 cliff-gate (symmetric with create_session_context): suppress the advertised scan ordering
+    // for aggregate/GROUP BY shapes by registering with empty sort fields; scan/TopK keep it. See
+    // session_context::substrait_has_aggregate_rel. (This deprecated path is benchmark-only.)
+    let (sf, so): (&[String], &[String]) = if substrait_has_aggregate_rel(&plan_bytes) {
+        (&[], &[])
+    } else {
+        (sort_fields, sort_orders)
+    };
+    register_listing_table(&ctx, &table_name, table_path, sf, so).await?;
 
     // Planning: build the query DataFrame (Substrait decode for normal search, native filter for an
     // engine-internal point lookup). Physical planning + execution below is shared by both.

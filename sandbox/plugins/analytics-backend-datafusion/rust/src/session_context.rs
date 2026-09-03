@@ -313,10 +313,28 @@ pub async unsafe fn create_session_context(
     let mut listing_options = ListingOptions::new(Arc::new(ParquetFormat::default()))
         .with_file_extension(".parquet");
 
-    if let Some(sort_exprs) =
-        build_file_sort_order(&shard_view.sort_fields, &shard_view.sort_orders)
-    {
-        listing_options = listing_options.with_file_sort_order(vec![sort_exprs]);
+    // DF55 cliff-gate (q27/q28 ~4× GROUP BY regression). Advertising the scan's `output_ordering`
+    // (via `with_file_sort_order`) makes DF55 elect an order-preserving aggregate
+    // (`ordering_mode=Sorted` + `preserve_order=true` Hash repartition, 64 channels vs 8) for a
+    // GROUP BY on the leading index.sort column. That throttles the parallel scan feed
+    // (`send_time`≈25.8 s vs `aggregation_time`≈0.65 s). DF54 did not propagate the ordering through
+    // `output_ordering`, so it used a plain hash aggregate → no regression.
+    //
+    // Fix: suppress the advertised ordering ONLY for aggregate/GROUP BY shapes; KEEP it for pure
+    // scan / scan+TopK shapes (`ORDER BY sort_key LIMIT`), whose DF55 #22450 dynamic-filter row-group
+    // pruning relies on it (a blanket removal would strip that too — strictly worse). The shape is
+    // read from the Substrait plan (`substrait_has_aggregate_rel`) because `has_partial_aggregate` is
+    // false on a single shard. The symmetric gate for the legacy `execute_query` path is at its caller
+    // `query_executor::execute_query` (which has `plan_bytes` in scope); `register_listing_table`
+    // itself stays plan-agnostic. Dropping the advertised ordering for aggregate shapes also drops the
+    // DECLARED `FileScanConfig.preserve_order` (gates work-stealing + RG-limit pruning) — neutral to
+    // positive for GROUP BY (declared-present disables work-stealing; the RG pruning is layout-gated).
+    if !substrait_has_aggregate_rel(plan_bytes) {
+        if let Some(sort_exprs) =
+            build_file_sort_order(&shard_view.sort_fields, &shard_view.sort_orders)
+        {
+            listing_options = listing_options.with_file_sort_order(vec![sort_exprs]);
+        }
     }
 
     // Register under the planner's logical table name (alias / index pattern / index), shipped
@@ -680,6 +698,40 @@ fn substrait_has_fetch_rel(plan_bytes: &[u8]) -> bool {
             rr.input.as_ref().map_or(false, |r| rel_has_fetch(r))
         }
         Some(substrait::proto::plan_rel::RelType::Rel(r)) => rel_has_fetch(r),
+        None => false,
+    })
+}
+
+/// DF55 cliff-gate: true iff the Substrait fragment contains an `AggregateRel`. Used to suppress the
+/// scan's advertised `output_ordering` for aggregate/GROUP BY shapes so DF55 does NOT elect an
+/// order-preserving aggregate (`ordering_mode=Sorted`) on the leading index.sort column (the q27/q28
+/// cliff). Pure scan / scan+TopK shapes have no AggregateRel and keep the ordering (needed for #22450
+/// dynamic-filter row-group pruning). `has_partial_aggregate` cannot be used — it is false on a single
+/// shard — so the shape is read from the plan bytes, mirroring `substrait_has_fetch_rel`. Shared by the
+/// `create_session_context` gate and the `query_executor::execute_query` (legacy path) gate.
+pub(crate) fn substrait_has_aggregate_rel(plan_bytes: &[u8]) -> bool {
+    use prost::Message;
+    use substrait::proto::rel::RelType;
+
+    fn rel_has_aggregate(rel: &substrait::proto::Rel) -> bool {
+        match rel.rel_type.as_ref() {
+            Some(RelType::Aggregate(_)) => true,
+            Some(RelType::Sort(s)) => s.input.as_ref().map_or(false, |r| rel_has_aggregate(r)),
+            Some(RelType::Project(p)) => p.input.as_ref().map_or(false, |r| rel_has_aggregate(r)),
+            Some(RelType::Filter(f)) => f.input.as_ref().map_or(false, |r| rel_has_aggregate(r)),
+            Some(RelType::Fetch(f)) => f.input.as_ref().map_or(false, |r| rel_has_aggregate(r)),
+            _ => false,
+        }
+    }
+
+    let Ok(plan) = substrait::proto::Plan::decode(plan_bytes) else {
+        return false;
+    };
+    plan.relations.iter().any(|pr| match pr.rel_type.as_ref() {
+        Some(substrait::proto::plan_rel::RelType::Root(rr)) => {
+            rr.input.as_ref().map_or(false, |r| rel_has_aggregate(r))
+        }
+        Some(substrait::proto::plan_rel::RelType::Rel(r)) => rel_has_aggregate(r),
         None => false,
     })
 }

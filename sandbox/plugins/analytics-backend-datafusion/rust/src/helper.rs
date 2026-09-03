@@ -115,6 +115,12 @@ pub async fn register_listing_table(
     // DF55: `collect_stat` moved off `ListingOptions` to `SessionConfig` (defaults true).
     let mut listing_options = ListingOptions::new(Arc::new(ParquetFormat::new()))
         .with_file_extension(".parquet");
+    // Declare the per-file sort order when an `index.sort.field` is described. The DF55 cliff-gate
+    // lives at the CALLERS: they pass EMPTY `sort_fields` for aggregate/GROUP BY shapes (which would
+    // otherwise make DF55 advertise `output_ordering` → `ordering_mode=Sorted` → the q27/q28
+    // regression — see `session_context::substrait_has_aggregate_rel`), and the real sort fields for
+    // scan/TopK shapes (whose #22450 dynamic-filter row-group pruning relies on the ordering). This
+    // helper stays plan-agnostic and just honours what it is given.
     if let Some(sort_exprs) = build_file_sort_order(sort_fields, sort_orders) {
         listing_options = listing_options.with_file_sort_order(vec![sort_exprs]);
     }
