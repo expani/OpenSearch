@@ -262,6 +262,9 @@ pub async unsafe fn create_session_context(
             .split_file_groups_by_statistics = true;
     }
 
+    // FIXME [RemoveBeforeMerge]: df55-instr — time per-query SessionState build (with_default_features
+    // grew in DF55) + register_all. This is the VANILLA q06 ctx-build path (create_session_context).
+    let __t_csc = std::time::Instant::now();
     let mut state_builder = SessionStateBuilder::new()
         .with_config(config)
         .with_runtime_env(Arc::from(runtime_env))
@@ -282,7 +285,9 @@ pub async unsafe fn create_session_context(
             )));
     }
 
+    let __t_build = std::time::Instant::now();
     let state = state_builder.build();
+    let __d_build = __t_build.elapsed();
 
     let ctx = SessionContext::new_with_state(state);
     // Register OpenSearch UDFs (parse, item, mvappend, mvfind, mvzip, convert_tz, …)
@@ -290,9 +295,28 @@ pub async unsafe fn create_session_context(
     // their function names. Without this, fragment execution fails with "Unsupported
     // function name" because df_execute_with_context reuses this handle's ctx instead
     // of building a fresh one.
+    let __t_reg = std::time::Instant::now();
     crate::udf::register_all(&ctx);
     crate::udaf::register_all(&ctx);
     crate::udwf::register_all(&ctx);
+    log_debug!(
+        "[df55-instr] create_session_context: with_default_features+build={:?} register_all={:?} build_block_total={:?}",
+        __d_build, __t_reg.elapsed(), __t_csc.elapsed()
+    );
+    // FIXME [RemoveBeforeMerge]: df55-instr — SessionContext CONTENT fingerprint (version-intrinsic,
+    // machine-independent). If DF55's default registry grew, these counts differ from DF54.
+    {
+        let __st = ctx.state();
+        log_debug!(
+            "[df55-instr] session_content: scalar_udfs={} aggregate_udfs={} window_udfs={} analyzer_rules={} optimizer_rules={} physical_optimizer_rules={}",
+            __st.scalar_functions().len(),
+            __st.aggregate_functions().len(),
+            __st.window_functions().len(),
+            __st.analyzer().rules.len(),
+            __st.optimizers().len(),
+            __st.physical_optimizers().len()
+        );
+    }
 
     // Register default ListingTable for parquet scans.
     //
@@ -325,6 +349,10 @@ pub async unsafe fn create_session_context(
     // a cache hit and never touches the page index bytes.
     // Cache key is meta.location (Path) — same key infer_schema uses.
     // Empty shard: loop is a no-op; infer_schema is also skipped below.
+    // FIXME [RemoveBeforeMerge]: df55-instr — time the footer metadata pre-warm loop (OUR code,
+    // parquet footer I/O per object_meta; scales with file/row-group count — scale-dependent suspect).
+    let __t_prewarm = std::time::Instant::now();
+    let __n_metas = shard_view.object_metas.as_ref().len();
     {
         let metadata_cache = runtime.runtime_env.cache_manager.get_file_metadata_cache();
         for meta in shard_view.object_metas.as_ref() {
@@ -337,9 +365,15 @@ pub async unsafe fn create_session_context(
             .await;
         }
     }
+    log_debug!(
+        "[df55-instr] create_session_context: metadata_prewarm_loop={:?} n_object_metas={}",
+        __t_prewarm.elapsed(), __n_metas
+    );
 
     // Empty shard: skip infer_schema (errors on zero files); widen_schema_from_plan
     // below populates columns from the substrait base_schema.
+    // FIXME [RemoveBeforeMerge]: df55-instr — bracket infer_schema (DF call; reads parquet metadata).
+    let __t_infer = std::time::Instant::now();
     let inferred: arrow::datatypes::SchemaRef = if shard_view.object_metas.is_empty() {
         Arc::new(arrow::datatypes::Schema::empty())
     } else {
@@ -354,8 +388,11 @@ pub async unsafe fn create_session_context(
         // schema to forms the Substrait consumer can bind against. See crate::schema_coerce.
         crate::schema_coerce::coerce_inferred_schema(inferred)
     };
+    log_debug!("[df55-instr] create_session_context: infer_schema(+coerce)={:?}", __t_infer.elapsed());
     // Pre-widening field count — compared below to detect whether widening added columns.
     let inferred_field_count = inferred.fields().len();
+    // FIXME [RemoveBeforeMerge]: df55-instr — time widen + ListingTable build + register (OUR + DF leaf calls).
+    let __t_tablereg = std::time::Instant::now();
 
     // Widen to the plan's base_schema if this shard's parquet is missing columns the plan
     // expects (multi-index unions, or single-index cross-shard drift). No-op when the shard
@@ -399,6 +436,10 @@ pub async unsafe fn create_session_context(
             );
             e
         })?;
+    log_debug!(
+        "[df55-instr] create_session_context: widen+listing_table_build+register={:?}",
+        __t_tablereg.elapsed()
+    );
     log_debug!(
         "create_session_context: registered table '{}' with file_sort_order_keys={}",
         register_name,

@@ -1215,6 +1215,8 @@ pub unsafe extern "C" fn df_create_session_context(
     plan_ptr: *const u8,
     plan_len: i64,
 ) -> i64 {
+    // FIXME [RemoveBeforeMerge]: df55-instr — FFM entry marker for the per-query session-context build.
+    native_bridge_common::log_debug!("[df55-instr] ffm: ENTER df_create_session_context");
     crate::search_stats::inc_listing_table_scan();
     let table_name = str_from_raw(table_name_ptr, table_name_len)
         .map_err(|e| format!("df_create_session_context: {}", e))?;
@@ -1498,6 +1500,9 @@ pub unsafe extern "C" fn df_execute_with_context(
     plan_ptr: *const u8,
     plan_len: i64,
 ) -> i64 {
+    // FIXME [RemoveBeforeMerge]: df55-instr — FFM entry marker; gap from Java "Substrait plan: N bytes"
+    // log to here = JNI marshal; from here to executor ENTER = block_on/spawn/gate scheduling.
+    native_bridge_common::log_debug!("[df55-instr] ffm: ENTER df_execute_with_context");
     let session_handle =
         *Box::from_raw(session_ctx_ptr as *mut crate::session_context::SessionContextHandle);
 
@@ -1557,12 +1562,15 @@ pub unsafe extern "C" fn df_execute_with_context(
         let partition_weight = session_handle.query_config.target_partitions.max(1) as u32;
         mgr.io_runtime
             .block_on(async move {
+                // FIXME [RemoveBeforeMerge]: df55-instr — scheduler: time gate-acquire + spawn dispatch.
+                let __t_sched = std::time::Instant::now();
                 // Acquire datanode gate on IO runtime BEFORE spawning on CPU.
                 // This blocks the IO thread (and thus the Java search thread),
                 // creating backpressure at the Java threadpool level when the gate is full.
                 let gate = mgr_for_spawn.cpu_executor().concurrency_gate().clone();
                 let max_p = gate.max_permits();
                 let permit = gate.acquire_many(partition_weight.min(max_p)).await;
+                let __d_gate = __t_sched.elapsed();
 
                 let inner_fut =
                     crate::task_monitors::query_execution_monitor().instrument(async move {
@@ -1574,7 +1582,17 @@ pub unsafe extern "C" fn df_execute_with_context(
                         )
                         .await
                     });
-                match mgr_for_spawn.cpu_executor().spawn(inner_fut).await {
+                let __t_spawn = std::time::Instant::now();
+                native_bridge_common::log_debug!(
+                    "[df55-instr] scheduler(vanilla): gate_acquire={:?} (spawn dispatch follows)",
+                    __d_gate
+                );
+                let __r = mgr_for_spawn.cpu_executor().spawn(inner_fut).await;
+                native_bridge_common::log_debug!(
+                    "[df55-instr] scheduler(vanilla): spawn_dispatch+exec_return={:?}",
+                    __t_spawn.elapsed()
+                );
+                match __r {
                     Ok(inner) => inner,
                     Err(e) => Err(datafusion::error::DataFusionError::Execution(format!(
                         "df_execute_with_context: CPU spawn failed: {e:?}"
