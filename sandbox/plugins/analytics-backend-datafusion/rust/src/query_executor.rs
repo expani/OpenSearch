@@ -198,6 +198,8 @@ pub async fn execute_with_context(
     // Permit was acquired by the caller (ffm.rs) on the IO runtime before
     // spawning on the CPU runtime, so the Java search thread blocks at the
     // gate when it is full — creating backpressure at the Java threadpool level.
+    // FIXME [RemoveBeforeMerge]: df55-instr — mark FFM/JNI entry to diff against the Java "Substrait plan: N bytes" log timestamp (catches the handoff gap before decode).
+    error!("[df55-instr] shard: ENTER execute_with_context");
     let context_id = handle.query_context.context_id();
     let token = crate::query_tracker::get_cancellation_token(context_id);
 
@@ -245,12 +247,26 @@ pub async fn execute_with_context(
             >((Box::into_raw(Box::new(wrapped)) as i64, Some(physical_plan)));
         }
 
+        // FIXME [RemoveBeforeMerge]: df55-instr — split the Substrait→logical bracket to find the +30ms.
+        let __t_decode = std::time::Instant::now();
         let substrait_plan = Plan::decode(plan_bytes).map_err(|e| {
             DataFusionError::Execution(format!("Failed to decode Substrait: {}", e))
         })?;
+        let __d_decode = __t_decode.elapsed();
+
+        // FIXME [RemoveBeforeMerge]: df55-instr — time ctx.state() separately from from_substrait_plan.
+        let __t_state = std::time::Instant::now();
+        let __state = handle.ctx.state();
+        let __d_state = __t_state.elapsed();
 
         // Union schema widening was applied at table registration (session_context::widen_to_union_schema).
-        let logical_plan = from_substrait_plan(&handle.ctx.state(), &substrait_plan).await?;
+        let __t_fsp = std::time::Instant::now();
+        let logical_plan = from_substrait_plan(&__state, &substrait_plan).await?;
+        let __d_fsp = __t_fsp.elapsed();
+        error!(
+            "[df55-instr] shard: decode={:?} ctx.state()={:?} from_substrait_plan={:?} bytes={}",
+            __d_decode, __d_state, __d_fsp, plan_bytes.len()
+        );
         log_debug!(
             "DataFusion logical plan:\n{}",
             logical_plan.display_indent()
@@ -301,10 +317,19 @@ pub async fn execute_with_context(
             >((Box::into_raw(Box::new(wrapped)) as i64, None));
         }
 
+        // FIXME [RemoveBeforeMerge]: df55-instr — time execute_logical_plan + create_physical_plan.
+        let __t_elp = std::time::Instant::now();
         let dataframe = handle.ctx.execute_logical_plan(logical_plan).await?;
+        let __d_elp = __t_elp.elapsed();
         // create_physical_plan runs all registered physical optimizer rules including
         // ProjectRowIdOptimizer (registered in session_context when strategy=ListingTable).
+        let __t_cpp = std::time::Instant::now();
         let physical_plan = dataframe.create_physical_plan().await?;
+        let __d_cpp = __t_cpp.elapsed();
+        error!(
+            "[df55-instr] shard: execute_logical_plan={:?} create_physical_plan={:?}",
+            __d_elp, __d_cpp
+        );
 
         let target_schema = crate::schema_coerce::coerce_inferred_schema(physical_plan.schema());
         let physical_plan =
