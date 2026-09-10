@@ -836,6 +836,10 @@ async unsafe fn execute_indexed_with_context_inner(
     cpu_executor: DedicatedExecutor,
     permit: tokio::sync::OwnedSemaphorePermit,
 ) -> Result<i64, DataFusionError> {
+    // FIXME [RemoveBeforeMerge]: df55-instr — mark FFM entry of the indexed exec path so the gap
+    // between the Java "Substrait plan: N bytes" log and this line = JNI/FFM + block_on handoff.
+    log_debug!("[df55-instr] indexed: ENTER execute_indexed_with_context_inner");
+    let __t_enter = std::time::Instant::now();
     // Permit was acquired by the caller (ffm.rs) on the IO runtime before
     // spawning on the CPU runtime, so the Java search thread blocks at the
     // gate when it is full — creating backpressure at the Java threadpool level.
@@ -1413,15 +1417,37 @@ async unsafe fn execute_indexed_with_context_inner(
         sort_orders: sort_orders.clone(),
         cancellation_token: crate::query_tracker::get_cancellation_token(context_id),
     }));
+    // FIXME [RemoveBeforeMerge]: df55-instr — split the Substrait→logical bracket.
+    let __d_pre = __t_enter.elapsed(); // ENTER → here: provider build + segment setup + register prep
+    let __t_reg = std::time::Instant::now();
     ctx.register_table(&register_name, provider)?;
+    let __d_reg = __t_reg.elapsed();
 
-    let logical_plan = from_substrait_plan(&ctx.state(), &plan).await?;
+    let __t_state = std::time::Instant::now();
+    let __state = ctx.state();
+    let __d_state = __t_state.elapsed();
+
+    let __t_fsp = std::time::Instant::now();
+    let logical_plan = from_substrait_plan(&__state, &plan).await?;
+    let __d_fsp = __t_fsp.elapsed();
+    log_debug!(
+        "[df55-instr] indexed: pre_register(enter→reg)={:?} register_table={:?} ctx.state()={:?} from_substrait_plan={:?}",
+        __d_pre, __d_reg, __d_state, __d_fsp
+    );
     log_debug!(
         "DataFusion logical plan:\n{}",
         logical_plan.display_indent()
     );
+    let __t_elp = std::time::Instant::now();
     let dataframe = ctx.execute_logical_plan(logical_plan).await?;
+    let __d_elp = __t_elp.elapsed();
+    let __t_cpp = std::time::Instant::now();
     let physical_plan = dataframe.create_physical_plan().await?;
+    let __d_cpp = __t_cpp.elapsed();
+    log_debug!(
+        "[df55-instr] indexed: execute_logical_plan={:?} create_physical_plan={:?}",
+        __d_elp, __d_cpp
+    );
     // Retag bit-compatible Int↔UInt output mismatches to match the substrait-declared
     // types. The target is schema_coerce::coerce_inferred_schema(physical_schema) — same
     // narrowing the partition-stream registration uses, so consumer-side StreamingTable
