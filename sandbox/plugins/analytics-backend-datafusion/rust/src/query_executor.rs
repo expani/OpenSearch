@@ -199,7 +199,7 @@ pub async fn execute_with_context(
     // spawning on the CPU runtime, so the Java search thread blocks at the
     // gate when it is full — creating backpressure at the Java threadpool level.
     // FIXME [RemoveBeforeMerge]: df55-instr — mark FFM/JNI entry to diff against the Java "Substrait plan: N bytes" log timestamp (catches the handoff gap before decode).
-    error!("[df55-instr] shard: ENTER execute_with_context");
+    log_debug!("[df55-instr] shard: ENTER execute_with_context");
     let context_id = handle.query_context.context_id();
     let token = crate::query_tracker::get_cancellation_token(context_id);
 
@@ -263,7 +263,7 @@ pub async fn execute_with_context(
         let __t_fsp = std::time::Instant::now();
         let logical_plan = from_substrait_plan(&__state, &substrait_plan).await?;
         let __d_fsp = __t_fsp.elapsed();
-        error!(
+        log_debug!(
             "[df55-instr] shard: decode={:?} ctx.state()={:?} from_substrait_plan={:?} bytes={}",
             __d_decode, __d_state, __d_fsp, plan_bytes.len()
         );
@@ -326,7 +326,7 @@ pub async fn execute_with_context(
         let __t_cpp = std::time::Instant::now();
         let physical_plan = dataframe.create_physical_plan().await?;
         let __d_cpp = __t_cpp.elapsed();
-        error!(
+        log_debug!(
             "[df55-instr] shard: execute_logical_plan={:?} create_physical_plan={:?}",
             __d_elp, __d_cpp
         );
