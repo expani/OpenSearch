@@ -175,6 +175,9 @@ pub fn build_query_session_context(
         datafusion::common::config::ConfigNonZeroUsize::try_new(query_config.batch_size)
             .expect("batch size must be greater than zero");
 
+    // FIXME [RemoveBeforeMerge]: df55-instr — time the per-query SessionState/registry build
+    // (with_default_features + register_all); DF55's default registry grew — prime +28ms suspect.
+    let __t_bsc = std::time::Instant::now();
     let mut builder = SessionStateBuilder::new()
         .with_config(config)
         .with_runtime_env(runtime_env)
@@ -184,11 +187,19 @@ pub fn build_query_session_context(
         // combine-partial-final physical optimizer pass.
         builder = builder.with_physical_optimizer_rules(physical_optimizer_rules_without_combine());
     }
+    let __t_build = std::time::Instant::now();
     let state = builder.build();
+    let __d_build = __t_build.elapsed();
 
     let ctx = SessionContext::new_with_state(state);
+    let __t_reg = std::time::Instant::now();
     udf::register_all(&ctx);
     udaf::register_all(&ctx);
+    let __d_reg = __t_reg.elapsed();
+    native_bridge_common::log_debug!(
+        "[df55-instr] build_query_session_context: with_default_features+build={:?} register_all={:?} total={:?} indexed={}",
+        __d_build, __d_reg, __t_bsc.elapsed(), indexed_path
+    );
     if indexed_path {
         // Indexed-path-only UDFs, on top of the base UDFs above.
         ctx.register_udf(create_index_filter_udf());
