@@ -97,3 +97,12 @@ codegen-units = 16
 incremental = true
 debug = "full"
 strip = false
+
+[patch.crates-io]
+# FIXME [df55-regression]: datafusion-datasource-parquet 55.0.0 with infer_schema forced to
+# PageIndexPolicy::Skip (schema inference never uses the page index; DF55 #22857 otherwise loads
+# it per query, +~30ms, since our footer-only L1 cache strips it). Patch maintained at
+# patches/datafusion-datasource-parquet-55.0.0-infer-skip-pageindex.patch, applied to the
+# checksum-verified crates.io tarball by :sandbox:libs:dataformat-native:preparePatchedDatafusionParquet
+# (must run once before cargo). Upstream candidate; remove if adopted by DataFusion. See patches/README.md.
+datafusion-datasource-parquet = { path = "build/patched/datafusion-datasource-parquet-55.0.0" }

@@ -6,6 +6,8 @@
  * compatible open source license.
  */
 
+import java.security.MessageDigest
+
 apply plugin: 'opensearch.build'
 
 description = 'Shared native bridge utilities for OpenSearch sandbox plugins'
@@ -60,10 +62,99 @@ def buildType = project.hasProperty('rustDebug') ? 'debug' : 'release'
 def rustWorkspaceDir = file("${projectDir}/rust")
 def nativeLibFile = file("${rustWorkspaceDir}/target/${buildType}/${libPrefix}${nativeLibName}${libExtension}")
 
+// ═══════════════════════════════════════════════════════════════════
+// Patched third-party crate: datafusion-datasource-parquet
+//
+// FIXME [df55-regression]: DF55 (#22857) made `infer_schema` load the parquet page index
+// (Optional-when-cached), which our footer-only L1 metadata cache strips → reloaded every query
+// (+~30ms). Schema inference never uses the page index. This patch forces PageIndexPolicy::Skip on
+// infer_schema's DFParquetMetadata builder (restores DF54 behavior). Upstream candidate.
+// Mechanism mirrors the parquet forward-cursor patch (opensearch PR #22732 / patches/README.md).
+// ═══════════════════════════════════════════════════════════════════
+def dfParquetVersion = '55.0.0'
+def dfParquetCrate = 'datafusion-datasource-parquet'
+def dfParquetPatchFile = file("${rustWorkspaceDir}/patches/${dfParquetCrate}-${dfParquetVersion}-infer-skip-pageindex.patch")
+def dfParquetShaFile = file("${rustWorkspaceDir}/patches/${dfParquetCrate}-${dfParquetVersion}.crate.sha256")
+def patchedDfParquetDir = file("${rustWorkspaceDir}/build/patched/${dfParquetCrate}-${dfParquetVersion}")
+def patchedParentDir = file("${rustWorkspaceDir}/build/patched")
+def dfParquetDownloadDir = file("${rustWorkspaceDir}/build/downloads")
+def repoRootPath = project.rootDir.absolutePath
+def offlineBuild = gradle.startParameter.offline
+
+def sha256Of = { File target ->
+    def digest = MessageDigest.getInstance('SHA-256')
+    target.eachByte(64 * 1024) { buffer, bytesRead -> digest.update(buffer, 0, bytesRead) }
+    digest.digest().encodeHex().toString()
+}
+
+task preparePatchedDatafusionParquet {
+    description = "Download ${dfParquetCrate} ${dfParquetVersion} from crates.io, verify checksum, apply in-tree patch"
+    group = 'build'
+    inputs.files dfParquetPatchFile, dfParquetShaFile
+    outputs.dir patchedDfParquetDir
+
+    doLast {
+        if (!dfParquetPatchFile.exists() || !dfParquetShaFile.exists()) {
+            throw new GradleException("Missing patch inputs:\n  ${dfParquetPatchFile}\n  ${dfParquetShaFile}")
+        }
+        dfParquetDownloadDir.mkdirs()
+        def tarball = new File(dfParquetDownloadDir, "${dfParquetCrate}-${dfParquetVersion}.crate")
+        if (!tarball.exists()) {
+            if (offlineBuild) {
+                throw new GradleException("--offline requested but ${tarball} is not cached. Run once online.")
+            }
+            def url = "https://static.crates.io/crates/${dfParquetCrate}/${dfParquetCrate}-${dfParquetVersion}.crate"
+            logger.lifecycle("Downloading ${url}")
+            def tmp = new File(dfParquetDownloadDir, "${dfParquetCrate}-${dfParquetVersion}.crate.part")
+            def connection = new URL(url).openConnection()
+            connection.connectTimeout = 30_000
+            connection.readTimeout = 120_000
+            tmp.withOutputStream { out -> connection.inputStream.withCloseable { inp -> out << inp } }
+            if (!tmp.renameTo(tarball)) { throw new GradleException("Could not move ${tmp} to ${tarball}") }
+        }
+        def expected = dfParquetShaFile.text.trim().split(/\s+/)[0]
+        def actual = sha256Of(tarball)
+        if (actual != expected) {
+            tarball.delete()
+            throw new GradleException("Checksum mismatch for ${tarball.name}\n  expected: ${expected}\n  actual:   ${actual}\nDeleted; re-run to retry.")
+        }
+        patchedDfParquetDir.deleteDir()
+        patchedParentDir.mkdirs()
+        def untar = new ProcessBuilder('tar', '-xzf', tarball.absolutePath, '-C', patchedParentDir.absolutePath)
+            .redirectErrorStream(true).start()
+        def untarOutput = untar.inputStream.text
+        if (untar.waitFor() != 0) { throw new GradleException("Failed to unpack ${tarball.name}:\n${untarOutput}") }
+
+        def runGit = { List<String> args ->
+            def proc = new ProcessBuilder(['git'] + args).directory(patchedDfParquetDir).redirectErrorStream(true)
+            proc.environment().put('GIT_CEILING_DIRECTORIES', repoRootPath)
+            def started = proc.start(); def out = started.inputStream.text
+            [exit: started.waitFor(), output: out]
+        }
+        def patchTargets = dfParquetPatchFile.readLines()
+            .findAll { it.startsWith('+++ ') }
+            .collect { it.substring(4).trim().split('\t')[0].split('/').drop(2).join('/') }
+            .findAll { it }
+        if (patchTargets.isEmpty()) { throw new GradleException("No target paths in ${dfParquetPatchFile}") }
+        def digestsBeforeApply = patchTargets.collectEntries { [it, sha256Of(new File(patchedDfParquetDir, it))] }
+        def applied = runGit(['apply', '-p2', dfParquetPatchFile.absolutePath])
+        if (applied.exit != 0) {
+            throw new GradleException("Failed to apply ${dfParquetPatchFile.name}:\n${applied.output}")
+        }
+        def untouched = patchTargets.findAll { sha256Of(new File(patchedDfParquetDir, it)) == digestsBeforeApply[it] }
+        if (!untouched.isEmpty()) {
+            throw new GradleException("${dfParquetPatchFile.name} left unchanged: ${untouched.join(', ')}\n${applied.output}")
+        }
+        logger.lifecycle("Applied ${dfParquetPatchFile.name} to ${patchTargets.size()} file(s) in ${patchedDfParquetDir}")
+    }
+}
+
 task buildRustLibrary(type: Exec) {
     description = 'Build the unified Rust native library from the Cargo workspace'
     group = 'build'
     workingDir rustWorkspaceDir
+    // cargo cannot read the workspace manifest until [patch.crates-io]'s path exists.
+    dependsOn preparePatchedDatafusionParquet
 
     def cargoExecutable = 'cargo'
     def possibleCargoPaths = [
