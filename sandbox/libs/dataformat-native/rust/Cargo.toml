@@ -91,13 +91,9 @@ opensearch-repository-fs = { path = "../../../plugins/native-repository-fs/src/m
 # invoking cargo directly. Remove once the APIs land upstream (apache/arrow-rs#10655) and
 # DataFusion's arrow pin includes them. See patches/README.md.
 parquet = { path = "build/patched/parquet-59.2.0" }
-# FIXME [df55-regression]: datafusion-datasource-parquet 55.0.0 with infer_schema forced to
-# PageIndexPolicy::Skip (schema inference never uses the page index; DF55 #22857 otherwise loads
-# it per query, +~30ms, since our footer-only L1 cache strips it). Patch maintained at
-# patches/datafusion-datasource-parquet-55.0.0-infer-skip-pageindex.patch, applied to the
-# checksum-verified crates.io tarball by :sandbox:libs:dataformat-native:preparePatchedDatafusionDatasourceParquet
-# (must run once before cargo). Upstream candidate; remove if adopted by DataFusion. See patches/README.md.
-datafusion-datasource-parquet = { path = "build/patched/datafusion-datasource-parquet-55.0.0" }
+# A/B leg A (df_v55_ab_nofix, THROWAWAY): infer-skip patch intentionally DISABLED — stock
+# datafusion-datasource-parquet 55.0.0 reintroduces the +30ms/query infer_schema page-index load.
+# Do NOT merge this branch.
 
 [profile.release]
 lto = true
